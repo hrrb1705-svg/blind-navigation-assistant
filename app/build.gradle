@@ -1,0 +1,41 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// امضای انتشار فقط وقتی فعال می‌شود که متغیرهای محیطی ساخت تنظیم شده باشند.
+// اگر نباشند، نسخه release بدون امضای سفارشی ساخته می‌شود و debug همچنان کار می‌کند.
+def ksPath = System.getenv("BNA_KEYSTORE_PATH")
+
+android {
+    namespace 'ir.bna.assistant'
+    compileSdk 34
+    defaultConfig {
+        applicationId "ir.bna.assistant"
+        minSdk 24
+        targetSdk 34
+        versionCode (System.getenv("BNA_VERSION_CODE") ?: "1").toInteger()
+        versionName "0.1.0-lite"
+    }
+    signingConfigs {
+        if (ksPath) {
+            release {
+                storeFile file(ksPath)
+                storePassword System.getenv("BNA_KS_PASS")
+                keyAlias System.getenv("BNA_KEY_ALIAS")
+                keyPassword System.getenv("BNA_KEY_PASS")
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ksPath) signingConfig signingConfigs.release
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+}

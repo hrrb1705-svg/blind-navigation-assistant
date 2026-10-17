@@ -1,0 +1,47 @@
+name: Build APK
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: "8.7"
+      - name: آماده‌سازی کلید امضا (اگر ساخته شده باشد)
+        env:
+          KS_B64: ${{ secrets.BNA_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/bna.jks"
+            echo "BNA_KEYSTORE_PATH=$RUNNER_TEMP/bna.jks" >> "$GITHUB_ENV"
+          fi
+      - name: ساخت APK
+        env:
+          BNA_KS_PASS: ${{ secrets.BNA_KS_PASS }}
+          BNA_KEY_ALIAS: ${{ secrets.BNA_KEY_ALIAS }}
+          BNA_KEY_PASS: ${{ secrets.BNA_KEY_PASS }}
+          BNA_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          if [ -n "$BNA_KEYSTORE_PATH" ]; then
+            gradle assembleRelease --no-daemon
+            cp app/build/outputs/apk/release/app-release.apk blind-assistant.apk
+          else
+            gradle assembleDebug --no-daemon
+            cp app/build/outputs/apk/debug/app-debug.apk blind-assistant.apk
+          fi
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: آخرین نسخه
+          prerelease: true
+          files: blind-assistant.apk
