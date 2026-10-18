@@ -3,36 +3,48 @@ plugins {
     id 'org.jetbrains.kotlin.android'
 }
 
-// امضای انتشار فقط وقتی فعال می‌شود که متغیرهای محیطی ساخت تنظیم شده باشند.
-// اگر نباشند، نسخه release بدون امضای سفارشی ساخته می‌شود و debug همچنان کار می‌کند.
-def ksPath = System.getenv("BNA_KEYSTORE_PATH")
+// امضای انتشار فقط وقتی فعال می‌شود که مسیر کلید در متغیرهای محیطی ساخت باشد.
+// اگر نباشد، نسخه debug ساخته می‌شود و کار می‌کند.
+def envOr(String name, String fallback) {
+    def v = System.getenv(name)
+    return (v == null || v.trim().isEmpty()) ? fallback : v
+}
+
+def ksPath = envOr("BNA_KEYSTORE_PATH", "")
+def verCode = envOr("BNA_VERSION_CODE", "1").toInteger()
 
 android {
     namespace 'ir.bna.assistant'
     compileSdk 34
+
     defaultConfig {
         applicationId "ir.bna.assistant"
         minSdk 24
         targetSdk 34
-        versionCode (System.getenv("BNA_VERSION_CODE") ?: "1").toInteger()
+        versionCode verCode
         versionName "0.1.0-lite"
     }
+
     signingConfigs {
-        if (ksPath) {
-            release {
+        release {
+            if (ksPath) {
                 storeFile file(ksPath)
-                storePassword System.getenv("BNA_KS_PASS")
-                keyAlias System.getenv("BNA_KEY_ALIAS")
-                keyPassword System.getenv("BNA_KEY_PASS")
+                storePassword envOr("BNA_KS_PASS", "")
+                keyAlias envOr("BNA_KEY_ALIAS", "bna")
+                keyPassword envOr("BNA_KEY_PASS", "")
             }
         }
     }
+
     buildTypes {
         release {
             minifyEnabled false
-            if (ksPath) signingConfig signingConfigs.release
+            if (ksPath) {
+                signingConfig signingConfigs.release
+            }
         }
     }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
