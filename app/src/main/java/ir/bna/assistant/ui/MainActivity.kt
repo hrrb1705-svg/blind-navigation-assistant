@@ -147,10 +147,19 @@ class MainActivity : Activity() {
         location.getOnce { l, msg ->
             if (l == null) { speaker.say(msg); return@getOnce }
             location.address(l) { addr ->
-                speaker.say(
-                    if (addr != null) tr("نزدیک $addr. ${LocationModule.accuracyFa(l)}", "Near $addr.")
+                val base = if (addr != null) tr("نزدیک $addr. ${LocationModule.accuracyFa(l)}", "Near $addr.")
                     else tr("نشانی پیدا نشد؛ شاید اینترنت وصل نیست. $msg", "Address not found. $msg")
-                )
+                speaker.say(base)
+                Thread {
+                    val places = try { ir.bna.assistant.route.Nearby.find(l.latitude, l.longitude) } catch (e: Exception) { AppLog.e("مکان‌های اطراف", e); null }
+                    runOnUiThread {
+                        speaker.say(when {
+                            places == null -> tr("اطلاعات مکان‌های اطراف دریافت نشد.", "Nearby places unavailable.")
+                            places.isEmpty() -> tr("مکان نام‌داری در اطراف ثبت نشده است.", "No named places nearby.")
+                            else -> tr("اطراف شما: ", "Nearby: ") + places.joinToString("، ")
+                        })
+                    }
+                }.start()
             }
         }
     }
@@ -185,7 +194,7 @@ class MainActivity : Activity() {
                 } catch (e: Exception) {
                     AppLog.e("مسیریابی ناموفق", e)
                     failMsg = if (!Capabilities.internetNow(this)) tr("اینترنت وصل نیست.", "No internet.")
-                    else tr("سرویس مسیریابی پاسخ نداد. کمی بعد دوباره تلاش کنید.", "Routing service did not respond.")
+                    else tr("سرویس مسیریابی پاسخ نداد. کد خطا: ${e.javaClass.simpleName} ${e.message?.take(60) ?: ""}", "Routing service failed: ${e.javaClass.simpleName}")
                     null
                 }
                 runOnUiThread {

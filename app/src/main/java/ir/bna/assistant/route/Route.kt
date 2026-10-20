@@ -52,13 +52,22 @@ object RouteService {
 
     /** مسیر پیاده از مبدا به مقصد؛ باید در Thread اجرا شود */
     fun fetch(from: Location, to: Pt, destName: String): Route? {
-        val url = "$OSRM${from.longitude},${from.latitude};${to.lon},${to.lat}" +
-            "?steps=true&geometries=geojson&overview=full"
-        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 10000; readTimeout = 15000
+        val tail = "${from.longitude},${from.latitude};${to.lon},${to.lat}?steps=true&geometries=geojson&overview=full"
+        val urls = listOf("https://routing.openstreetmap.de/routed-foot/route/v1/foot/$tail", "$OSRM$tail")
+        var last: Exception? = null
+        for (u in urls) {
+            try {
+                val conn = (URL(u).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 10000; readTimeout = 20000
+                    setRequestProperty("User-Agent", "ir.bna.assistant")
+                }
+                val body = try { conn.inputStream.bufferedReader().use { it.readText() } } finally { conn.disconnect() }
+                val r = parse(JSONObject(body), destName)
+                if (r != null) return r
+            } catch (e: Exception) { last = e }
         }
-        val body = try { conn.inputStream.bufferedReader().use { it.readText() } } finally { conn.disconnect() }
-        return parse(JSONObject(body), destName)
+        if (last != null) throw last
+        return null
     }
 
     private fun parse(j: JSONObject, destName: String): Route? {
