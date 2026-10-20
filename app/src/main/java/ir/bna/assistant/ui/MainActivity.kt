@@ -76,7 +76,10 @@ class MainActivity : Activity() {
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
         top.addView(TextView(this).apply { text = Lang.t("title"); textSize = 20f },
             LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
-        top.addView(Ui.button(this, Lang.t("menu")) { showMenu() })
+        top.addView(Ui.button(this, Lang.t("menu")) { showMenu() }.apply {
+            textSize = 16f; minHeight = 0; minimumHeight = 0
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+        })
 
         val col = Ui.column(this)
         status = Ui.status(this)
@@ -168,11 +171,25 @@ class MainActivity : Activity() {
         location.getOnce { here, msg ->
             if (here == null) { speaker.say(msg); return@getOnce }
             Thread {
+                var failMsg: String? = null
                 val r = try {
-                    RouteService.geocode(this, name)?.let { RouteService.fetch(here, it, name) }
-                } catch (e: Exception) { AppLog.e("مسیریابی ناموفق", e); null }
+                    val dest = RouteService.geocode(this, name)
+                    if (dest == null) {
+                        failMsg = if (!Capabilities.internetNow(this)) tr("اینترنت وصل نیست؛ برای پیدا کردن مقصد لازم است.", "No internet; needed to find the destination.")
+                        else tr("مقصد پیدا نشد. نام را کامل‌تر بنویسید، مثلاً همراه با نام شهر.", "Destination not found. Write a fuller name with the city.")
+                        null
+                    } else RouteService.fetch(here, dest, name) ?: run {
+                        failMsg = tr("مقصد پیدا شد ولی مسیر پیاده ساخته نشد. کمی بعد دوباره تلاش کنید.", "Destination found but no walking route.")
+                        null
+                    }
+                } catch (e: Exception) {
+                    AppLog.e("مسیریابی ناموفق", e)
+                    failMsg = if (!Capabilities.internetNow(this)) tr("اینترنت وصل نیست.", "No internet.")
+                    else tr("سرویس مسیریابی پاسخ نداد. کمی بعد دوباره تلاش کنید.", "Routing service did not respond.")
+                    null
+                }
                 runOnUiThread {
-                    if (r == null) { speaker.say(tr("مسیری پیدا نشد. نام مقصد یا اتصال اینترنت را بررسی کنید.", "No route found. Check the destination or internet.")); return@runOnUiThread }
+                    if (r == null) { speaker.say(failMsg ?: tr("مسیری پیدا نشد.", "No route found.")); return@runOnUiThread }
                     route = r; stepIdx = 0; announcedIdx = -1
                     RouteService.save(this, r)
                     setRouteBtn()

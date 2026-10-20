@@ -28,9 +28,26 @@ object RouteService {
 
     /** نام مقصد را به مختصات تبدیل می‌کند؛ باید در Thread اجرا شود */
     fun geocode(ctx: Context, name: String): Pt? {
-        @Suppress("DEPRECATION")
-        val a = Geocoder(ctx, Locale("fa", "IR")).getFromLocationName(name, 1)?.firstOrNull() ?: return null
-        return Pt(a.latitude, a.longitude)
+        try {
+            @Suppress("DEPRECATION")
+            val a = Geocoder(ctx, Locale("fa", "IR")).getFromLocationName(name, 1)?.firstOrNull()
+            if (a != null) return Pt(a.latitude, a.longitude)
+        } catch (e: Exception) { /* ادامه با سرویس جایگزین */ }
+        return nominatim(name)
+    }
+
+    /** جایگزین رایگان OpenStreetMap وقتی Geocoder گوشی کار نمی‌کند */
+    private fun nominatim(name: String): Pt? {
+        val url = "https://nominatim.openstreetmap.org/search?format=json&limit=1&accept-language=fa&q=" + encode(name)
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 10000; readTimeout = 15000
+            setRequestProperty("User-Agent", "ir.bna.assistant")
+        }
+        val body = try { conn.inputStream.bufferedReader().use { it.readText() } } finally { conn.disconnect() }
+        val arr = org.json.JSONArray(body)
+        if (arr.length() == 0) return null
+        val o = arr.getJSONObject(0)
+        return Pt(o.getString("lat").toDouble(), o.getString("lon").toDouble())
     }
 
     /** مسیر پیاده از مبدا به مقصد؛ باید در Thread اجرا شود */
