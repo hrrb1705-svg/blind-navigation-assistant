@@ -106,6 +106,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        val saved = getSharedPreferences("ui", MODE_PRIVATE).getString("lang", "fa") ?: "fa"
+        if (saved != Lang.code) { Lang.code = saved; recreate(); return }
         if (::speaker.isInitialized) speaker.rate = settings.speechRate
         if (settings.compassEnabled) compass.start()
     }
@@ -117,29 +119,15 @@ class MainActivity : Activity() {
     // ---------- منو ----------
     private fun showMenu() {
         val items = arrayOf(Lang.t("menu_features"), Lang.t("menu_settings"), Lang.t("menu_safety"),
-            Lang.t("menu_language"), Lang.t("menu_guide"))
+            Lang.t("menu_guide"))
         AlertDialog.Builder(this).setTitle(Lang.t("menu")).setItems(items) { _, i ->
             when (i) {
                 0 -> speaker.say(caps.describeFa())
                 1 -> startActivity(Intent(this, SettingsActivity::class.java))
                 2 -> speaker.say(SAFETY)
-                3 -> showLanguage()
-                4 -> speaker.say(if (Lang.code == "en") GUIDE_EN else GUIDE_FA)
+                3 -> speaker.say(if (Lang.code == "en") GUIDE_EN else GUIDE_FA)
             }
         }.setNegativeButton(Lang.t("close"), null).show()
-    }
-
-    private fun showLanguage() {
-        val labels = Lang.options.map { it.second }.toTypedArray()
-        val current = Lang.options.indexOfFirst { it.first == Lang.code }.coerceAtLeast(0)
-        AlertDialog.Builder(this).setTitle(Lang.t("pick_lang"))
-            .setSingleChoiceItems(labels, current) { d, which ->
-                val code = Lang.options[which].first
-                getSharedPreferences("ui", MODE_PRIVATE).edit().putString("lang", code).apply()
-                Lang.code = code
-                d.dismiss()
-                recreate()
-            }.setNegativeButton(Lang.t("close"), null).show()
     }
 
     // ---------- کجا هستم ----------

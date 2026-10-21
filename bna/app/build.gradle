@@ -29,9 +29,10 @@ android {
         release {
             if (ksPath) {
                 storeFile file(ksPath)
-                storePassword envOr("BNA_KS_PASS", "")
+                storeType "pkcs12"
+                storePassword envOr("BNA_KS_PASS", "bna12345")
                 keyAlias envOr("BNA_KEY_ALIAS", "bna")
-                keyPassword envOr("BNA_KEY_PASS", "")
+                keyPassword envOr("BNA_KEY_PASS", "bna12345")
             }
         }
     }

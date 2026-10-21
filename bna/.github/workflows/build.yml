@@ -17,13 +17,15 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: "8.7"
-      - name: آماده‌سازی کلید امضا (اگر ساخته شده باشد)
+      - name: آماده‌سازی کلید امضا
         env:
           KS_B64: ${{ secrets.BNA_KEYSTORE_B64 }}
         run: |
           if [ -n "$KS_B64" ]; then
-            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/bna.jks"
-            echo "BNA_KEYSTORE_PATH=$RUNNER_TEMP/bna.jks" >> "$GITHUB_ENV"
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/bna.p12"
+            echo "BNA_KEYSTORE_PATH=$RUNNER_TEMP/bna.p12" >> "$GITHUB_ENV"
+          else
+            echo "BNA_KEYSTORE_PATH=$GITHUB_WORKSPACE/app/bna-release.p12" >> "$GITHUB_ENV"
           fi
       - name: ساخت APK
         env:
@@ -32,13 +34,8 @@ jobs:
           BNA_KEY_PASS: ${{ secrets.BNA_KEY_PASS }}
           BNA_VERSION_CODE: ${{ github.run_number }}
         run: |
-          if [ -n "$BNA_KEYSTORE_PATH" ]; then
-            gradle assembleRelease --no-daemon
-            cp app/build/outputs/apk/release/app-release.apk blind-assistant.apk
-          else
-            gradle assembleDebug --no-daemon
-            cp app/build/outputs/apk/debug/app-debug.apk blind-assistant.apk
-          fi
+          gradle assembleRelease --no-daemon
+          cp app/build/outputs/apk/release/app-release.apk blind-assistant.apk
       - name: بستهٔ نصب فشرده
         run: zip blind-assistant-installer.zip blind-assistant.apk
       - uses: softprops/action-gh-release@v2
