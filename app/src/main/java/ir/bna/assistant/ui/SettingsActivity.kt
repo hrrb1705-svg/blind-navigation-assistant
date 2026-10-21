@@ -106,8 +106,13 @@ class SettingsActivity : Activity() {
         col.addView(Ui.button(this, "آزمایش اتصال هوش مصنوعی") { testAi() })
 
         col.addView(Ui.button(this, "خواندن گزارش خطاها") {
-            val log = AppLog.read().lines().filter { "[ERROR]" in it }.takeLast(5)
-            speaker.say(if (log.isEmpty()) "خطایی ثبت نشده است." else log.joinToString(". "))
+            val errs = AppLog.read().lines().filter { "[ERROR]" in it }.takeLast(30)
+            val text = if (errs.isEmpty()) "خطایی ثبت نشده است." else errs.joinToString("\n\n")
+            val tv = android.widget.TextView(this).apply { this.text = text; textSize = 16f; setTextIsSelectable(true); setPadding(32, 16, 32, 16) }
+            android.app.AlertDialog.Builder(this).setTitle("خطاها (${errs.size})")
+                .setView(ScrollView(this).apply { addView(tv) })
+                .setPositiveButton("بستن", null).show()
+            speaker.say(if (errs.isEmpty()) text else "${errs.size} خطا ثبت شده است. متن در صفحه است؛ با انگشت بخوانید.")
         })
         col.addView(Ui.button(this, "پاک کردن گزارش خطاها") { AppLog.clear(); speaker.say("گزارش پاک شد.") })
         col.addView(Ui.button(this, "بازگشت") { finish() })

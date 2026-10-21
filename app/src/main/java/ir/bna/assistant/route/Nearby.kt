@@ -24,21 +24,29 @@ object Nearby {
         "dentist" to "دندانپزشکی", "doctors" to "مطب", "kindergarten" to "مهدکودک", "library" to "کتابخانه")
 
     fun find(lat: Double, lon: Double, radius: Int = 150): List<String> {
-        val q = "[out:json][timeout:15];nwr(around:$radius,$lat,$lon)[name][~\"^(amenity|shop|office|tourism|leisure|highway|railway)\$\"~\".\"];out center 40;"
+        val keys = listOf("amenity", "shop", "office", "tourism", "leisure", "highway", "railway")
+        val q = "[out:json][timeout:20];(" + keys.joinToString("") { "nwr(around:$radius,$lat,$lon)[\"$it\"][\"name\"];" } + ");out center 60;"
         var body: String? = null
+        var last: Exception? = null
         for (s in SERVERS) {
             try {
                 val c = (URL(s).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"; doOutput = true
-                    connectTimeout = 10000; readTimeout = 20000
+                    connectTimeout = 10000; readTimeout = 25000
                     setRequestProperty("User-Agent", "ir.bna.assistant")
                 }
                 c.outputStream.use { it.write(("data=" + URLEncoder.encode(q, "UTF-8")).toByteArray()) }
+                val code = c.responseCode
+                if (code != 200) { c.disconnect(); throw java.io.IOException("HTTP $code از ${java.net.URI(s).host}") }
                 body = try { c.inputStream.bufferedReader().use { it.readText() } } finally { c.disconnect() }
                 break
-            } catch (e: Exception) { /* سرور بعدی */ }
+            } catch (e: Exception) {
+                last = e
+                ir.bna.assistant.core.AppLog.e("اورپس ${java.net.URI(s).host}", e)
+            }
         }
-        val els = JSONObject(body ?: throw java.io.IOException("overpass")).getJSONArray("elements")
+        if (body == null) throw last ?: java.io.IOException("overpass")
+        val els = JSONObject(body).getJSONArray("elements")
         val kx = cos(Math.toRadians(lat)) * 111320.0
         val seen = HashSet<String>()
         val out = ArrayList<Pair<Int, String>>()

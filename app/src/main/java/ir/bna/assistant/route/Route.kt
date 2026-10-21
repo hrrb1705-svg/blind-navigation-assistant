@@ -137,14 +137,33 @@ object RouteService {
             r.steps.forEach { put(JSONObject().put("t", it.text).put("lat", it.lat).put("lon", it.lon).put("m", it.meters)) }
         })
         File(ctx.filesDir, FILE).writeText(j.toString())
+        try {
+            val d = File(ctx.filesDir, "routes"); d.mkdirs()
+            val f = File(d, safeName(r.destName) + ".json")
+            // اگر مسیر قبلاً ذخیره شده و یادداشت دارد، یادداشت‌ها حفظ شود
+            if (f.exists()) try { j.put("notes", JSONObject(f.readText()).optJSONArray("notes") ?: JSONArray()) } catch (_: Exception) { }
+            if (!j.has("notes")) j.put("notes", JSONArray())
+            f.writeText(j.toString())
+        } catch (_: Exception) { }
         // نقشه‌ی متنی برای خواندن با هر برنامه‌ی متنی
         val sb = StringBuilder("مسیر به ${r.destName} - حدود ${r.totalM} متر\n\n")
         r.steps.forEachIndexed { i, s -> sb.append("${i + 1}. ${s.text} (${s.meters} متر)\n") }
         File(ctx.filesDir, "route.txt").writeText(sb.toString())
     }
 
-    fun load(ctx: Context): Route? = try {
-        val j = JSONObject(File(ctx.filesDir, FILE).readText())
+    private fun safeName(n: String) = n.replace(Regex("[^\\p{L}\\p{N}]+"), "_").take(60).ifEmpty { "route" }
+
+    /** فهرست مسیرهای ذخیره‌شده، تازه‌ترین اول */
+    fun saved(ctx: Context): List<File> =
+        File(ctx.filesDir, "routes").listFiles { f -> f.name.endsWith(".json") }?.sortedByDescending { it.lastModified() } ?: emptyList()
+
+    fun loadFile(f: File): Route? = parseFile(f)
+    fun deleteSaved(f: File) { f.delete() }
+
+    fun load(ctx: Context): Route? = parseFile(File(ctx.filesDir, FILE))
+
+    private fun parseFile(f: File): Route? = try {
+        val j = JSONObject(f.readText())
         val p = j.getJSONArray("points")
         val s = j.getJSONArray("steps")
         Route(j.getString("dest"),

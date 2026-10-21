@@ -88,7 +88,7 @@ class MainActivity : Activity() {
         col.addView(Ui.button(this, Lang.t("where")) { whereAmI() })
         trackBtn = Ui.button(this, Lang.t("direction")) { toggleTracking() }
         col.addView(trackBtn)
-        routeBtn = Ui.button(this, Lang.t("route")) { if (route != null) endRoute(true) else askDestination() }
+        routeBtn = Ui.button(this, Lang.t("route")) { if (route != null) endRoute(true) else showRouteList() }
         col.addView(routeBtn)
         col.addView(Ui.button(this, Lang.t("photo")) { takePhoto(false) })
         col.addView(Ui.button(this, Lang.t("obstacle")) { takePhoto(true) })
@@ -165,6 +165,42 @@ class MainActivity : Activity() {
     }
 
     // ---------- مسیر به مقصد ----------
+    private fun showRouteList() {
+        if (!settings.gpsEnabled) { speaker.say(tr("جی‌پی‌اس در دسترس نیست.", "GPS is not available.")); return }
+        val files = RouteService.saved(this)
+        val routes = files.map { RouteService.loadFile(it) }
+        val items = (listOf(tr("مسیر جدید", "New route")) + files.indices.map { routes[it]?.destName ?: files[it].name }).toTypedArray()
+        AlertDialog.Builder(this).setTitle(tr("مسیرها", "Routes"))
+            .setItems(items) { _, i ->
+                if (i == 0) askDestination()
+                else routes[i - 1]?.let { showRouteInfo(it, files[i - 1], false) }
+            }
+            .setNegativeButton(Lang.t("close"), null).show()
+    }
+
+    private fun routeText(r: Route): String {
+        val sb = StringBuilder(tr("مسیر به ${r.destName}، حدود ${r.totalM} متر\n\n", "Route to ${r.destName}, ${r.totalM} m\n\n"))
+        r.steps.forEachIndexed { i, s -> sb.append("${i + 1}. ${s.text} (${s.meters} ${tr("متر", "m")})\n") }
+        return sb.toString()
+    }
+
+    private fun showRouteInfo(r: Route, file: java.io.File?, isNew: Boolean) {
+        val tv = TextView(this).apply { text = routeText(r); textSize = 16f; setTextIsSelectable(true); setPadding(32, 16, 32, 16) }
+        val b = AlertDialog.Builder(this).setTitle(r.destName)
+            .setView(ScrollView(this).apply { addView(tv) })
+            .setPositiveButton(tr("شروع پیاده‌روی", "Start walking")) { _, _ ->
+                route = r; stepIdx = 0; announcedIdx = -1
+                RouteService.save(this, r); setRouteBtn()
+                speaker.say(tr("شروع مسیر به ${r.destName}. ", "Starting route. ") + (r.steps.firstOrNull()?.text ?: ""))
+                if (!location.isTracking) startTracking(announce = false)
+            }
+            .setNegativeButton(Lang.t("close"), null)
+        if (file != null) b.setNeutralButton(tr("حذف", "Delete")) { _, _ -> RouteService.deleteSaved(file); speaker.say(tr("مسیر حذف شد.", "Route deleted.")) }
+        b.show()
+        speaker.say(tr("مسیر ${if (isNew) "ساخته و ذخیره شد" else "ذخیره‌شده"}: ${r.destName}، حدود ${r.totalM} متر، ${r.steps.size} مرحله. جزئیات در صفحه است. برای رفتن دکمه شروع پیاده‌روی را بزنید.",
+            "Route to ${r.destName}: ${r.totalM} m. Details on screen."))
+    }
+
     private fun askDestination() {
         if (!settings.gpsEnabled) { speaker.say(tr("جی‌پی‌اس در دسترس نیست.", "GPS is not available.")); return }
         if (!ask(Manifest.permission.ACCESS_FINE_LOCATION, REQ_LOC)) return
@@ -199,12 +235,8 @@ class MainActivity : Activity() {
                 }
                 runOnUiThread {
                     if (r == null) { speaker.say(failMsg ?: tr("مسیری پیدا نشد.", "No route found.")); return@runOnUiThread }
-                    route = r; stepIdx = 0; announcedIdx = -1
                     RouteService.save(this, r)
-                    setRouteBtn()
-                    speaker.say(tr("مسیر به ${r.destName}: حدود ${r.totalM} متر، ${r.steps.size} مرحله. ", "Route to ${r.destName}: about ${r.totalM} meters. ") +
-                        (r.steps.firstOrNull()?.text ?: ""))
-                    if (!location.isTracking) startTracking(announce = false)
+                    showRouteInfo(r, RouteService.saved(this).firstOrNull(), true)
                 }
             }.start()
         }
