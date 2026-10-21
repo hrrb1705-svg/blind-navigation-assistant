@@ -1,0 +1,53 @@
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+// امضای انتشار فقط وقتی فعال می‌شود که مسیر کلید در متغیرهای محیطی ساخت باشد.
+// اگر نباشد، نسخه debug ساخته می‌شود و کار می‌کند.
+def envOr(String name, String fallback) {
+    def v = System.getenv(name)
+    return (v == null || v.trim().isEmpty()) ? fallback : v
+}
+
+def ksPath = envOr("BNA_KEYSTORE_PATH", "")
+def verCode = envOr("BNA_VERSION_CODE", "1").toInteger()
+
+android {
+    namespace 'ir.bna.assistant'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId "ir.bna.assistant"
+        minSdk 24
+        targetSdk 34
+        versionCode verCode
+        versionName "0.1.0-lite"
+    }
+
+    signingConfigs {
+        release {
+            if (ksPath) {
+                storeFile file(ksPath)
+                storePassword envOr("BNA_KS_PASS", "")
+                keyAlias envOr("BNA_KEY_ALIAS", "bna")
+                keyPassword envOr("BNA_KEY_PASS", "")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ksPath) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions { jvmTarget = '17' }
+}
