@@ -15,7 +15,9 @@ import kotlin.math.sqrt
 
 data class Pt(val lat: Double, val lon: Double)
 data class Step(val text: String, val lat: Double, val lon: Double, val meters: Int)
-class Route(val destName: String, val points: List<Pt>, val steps: List<Step>, val totalM: Int)
+data class Note(val text: String, val lat: Double, val lon: Double)
+class Route(val destName: String, val points: List<Pt>, val steps: List<Step>, val totalM: Int,
+            val notes: MutableList<Note> = mutableListOf())
 
 /**
  * مسیریابی پیاده با OSRM عمومی (رایگان) و ذخیره‌ی روی گوشی.
@@ -51,8 +53,10 @@ object RouteService {
     }
 
     /** مسیر پیاده از مبدا به مقصد؛ باید در Thread اجرا شود */
-    fun fetch(from: Location, to: Pt, destName: String): Route? {
-        val tail = "${from.longitude},${from.latitude};${to.lon},${to.lat}?steps=true&geometries=geojson&overview=full"
+    fun fetch(from: Location, to: Pt, destName: String): Route? = fetch(Pt(from.latitude, from.longitude), to, destName)
+
+    fun fetch(from: Pt, to: Pt, destName: String): Route? {
+        val tail = "${from.lon},${from.lat};${to.lon},${to.lat}?steps=true&geometries=geojson&overview=full"
         val urls = listOf("https://routing.openstreetmap.de/routed-foot/route/v1/foot/$tail", "$OSRM$tail")
         var last: Exception? = null
         for (u in urls) {
@@ -130,24 +134,35 @@ object RouteService {
         return if (best == Double.MAX_VALUE) 0.0 else best
     }
 
-    fun save(ctx: Context, r: Route) {
+    private fun toJson(r: Route): JSONObject {
         val j = JSONObject().put("dest", r.destName).put("total", r.totalM)
         j.put("points", JSONArray().apply { r.points.forEach { put(JSONArray().put(it.lat).put(it.lon)) } })
         j.put("steps", JSONArray().apply {
             r.steps.forEach { put(JSONObject().put("t", it.text).put("lat", it.lat).put("lon", it.lon).put("m", it.meters)) }
         })
-        File(ctx.filesDir, FILE).writeText(j.toString())
-        try {
-            val d = File(ctx.filesDir, "routes"); d.mkdirs()
-            val f = File(d, safeName(r.destName) + ".json")
-            // اگر مسیر قبلاً ذخیره شده و یادداشت دارد، یادداشت‌ها حفظ شود
-            if (f.exists()) try { j.put("notes", JSONObject(f.readText()).optJSONArray("notes") ?: JSONArray()) } catch (_: Exception) { }
-            if (!j.has("notes")) j.put("notes", JSONArray())
-            f.writeText(j.toString())
-        } catch (_: Exception) { }
+        j.put("notes", JSONArray().apply {
+            r.notes.forEach { put(JSONObject().put("t", it.text).put("lat", it.lat).put("lon", it.lon)) }
+        })
+        return j
+    }
+
+    private fun libFile(ctx: Context, r: Route) = File(File(ctx.filesDir, "routes"), safeName(r.destName) + ".json")
+
+    fun isSaved(ctx: Context, r: Route) = libFile(ctx, r).exists()
+
+    /** ذخیره در فهرست مسیرها؛ فقط با موافقت کاربر صدا زده می‌شود */
+    fun saveToLibrary(ctx: Context, r: Route) {
+        val f = libFile(ctx, r); f.parentFile?.mkdirs(); f.writeText(toJson(r).toString())
+    }
+
+    /** مسیر جاری را می‌نویسد؛ اگر در فهرست هم ذخیره شده بود آن را هم به‌روز می‌کند */
+    fun save(ctx: Context, r: Route) {
+        File(ctx.filesDir, FILE).writeText(toJson(r).toString())
+        if (isSaved(ctx, r)) saveToLibrary(ctx, r)
         // نقشه‌ی متنی برای خواندن با هر برنامه‌ی متنی
         val sb = StringBuilder("مسیر به ${r.destName} - حدود ${r.totalM} متر\n\n")
         r.steps.forEachIndexed { i, s -> sb.append("${i + 1}. ${s.text} (${s.meters} متر)\n") }
+        if (r.notes.isNotEmpty()) { sb.append("\nیادداشت‌ها:\n"); r.notes.forEach { sb.append("- ${it.text} (${it.lat}, ${it.lon})\n") } }
         File(ctx.filesDir, "route.txt").writeText(sb.toString())
     }
 
@@ -170,7 +185,9 @@ object RouteService {
             (0 until p.length()).map { Pt(p.getJSONArray(it).getDouble(0), p.getJSONArray(it).getDouble(1)) },
             (0 until s.length()).map { val o = s.getJSONObject(it)
                 Step(o.getString("t"), o.getDouble("lat"), o.getDouble("lon"), o.getInt("m")) },
-            j.getInt("total"))
+            j.getInt("total"),
+            (j.optJSONArray("notes") ?: JSONArray()).let { n ->
+                (0 until n.length()).map { val o = n.getJSONObject(it); Note(o.getString("t"), o.getDouble("lat"), o.getDouble("lon")) }.toMutableList() })
     } catch (e: Exception) { null }
 
     fun clear(ctx: Context) {

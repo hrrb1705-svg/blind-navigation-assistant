@@ -115,6 +115,18 @@ class SettingsActivity : Activity() {
             speaker.say(if (errs.isEmpty()) text else "${errs.size} خطا ثبت شده است. متن در صفحه است؛ با انگشت بخوانید.")
         })
         col.addView(Ui.button(this, "پاک کردن گزارش خطاها") { AppLog.clear(); speaker.say("گزارش پاک شد.") })
+        col.addView(Ui.button(this, "زبان / Language") {
+            val labels = ir.bna.assistant.core.Lang.options.map { it.second }.toTypedArray()
+            val cur = ir.bna.assistant.core.Lang.options.indexOfFirst { it.first == ir.bna.assistant.core.Lang.code }.coerceAtLeast(0)
+            AlertDialog.Builder(this).setTitle("زبان / Language")
+                .setSingleChoiceItems(labels, cur) { d, which ->
+                    val code = ir.bna.assistant.core.Lang.options[which].first
+                    getSharedPreferences("ui", MODE_PRIVATE).edit().putString("lang", code).apply()
+                    ir.bna.assistant.core.Lang.code = code
+                    d.dismiss()
+                    speaker.say(if (code == "en") "Language changed to English." else "زبان به فارسی تغییر کرد.")
+                }.setNegativeButton("بستن", null).show()
+        })
         col.addView(Ui.button(this, "بازگشت") { finish() })
         setContentView(ScrollView(this).apply { addView(col) })
     }

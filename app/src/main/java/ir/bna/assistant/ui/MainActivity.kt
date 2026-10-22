@@ -28,6 +28,7 @@ import ir.bna.assistant.core.Lang
 import ir.bna.assistant.core.ProcessingMode
 import ir.bna.assistant.core.Settings
 import ir.bna.assistant.location.LocationModule
+import ir.bna.assistant.route.Note
 import ir.bna.assistant.route.Obstacle
 import ir.bna.assistant.route.Obstacles
 import ir.bna.assistant.route.Pt
@@ -59,6 +60,7 @@ class MainActivity : Activity() {
     private var announcedIdx = -1
     private var lastOffAlert = 0L
     private val announcedObs = mutableSetOf<Long>()
+    private val announcedNotes = mutableSetOf<Note>()
     private var pendingObstacle = false
 
     override fun onCreate(b: Bundle?) {
@@ -90,6 +92,7 @@ class MainActivity : Activity() {
         col.addView(trackBtn)
         routeBtn = Ui.button(this, Lang.t("route")) { if (route != null) endRoute(true) else showRouteList() }
         col.addView(routeBtn)
+        col.addView(Ui.button(this, tr("یادداشت در این مکان", "Note at this place")) { addNote() })
         col.addView(Ui.button(this, Lang.t("photo")) { takePhoto(false) })
         col.addView(Ui.button(this, Lang.t("obstacle")) { takePhoto(true) })
         setContentView(ScrollView(this).apply { addView(col) })
@@ -103,6 +106,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        val saved = getSharedPreferences("ui", MODE_PRIVATE).getString("lang", "fa") ?: "fa"
+        if (saved != Lang.code) { Lang.code = saved; recreate(); return }
         if (::speaker.isInitialized) speaker.rate = settings.speechRate
         if (settings.compassEnabled) compass.start()
     }
@@ -114,29 +119,15 @@ class MainActivity : Activity() {
     // ---------- منو ----------
     private fun showMenu() {
         val items = arrayOf(Lang.t("menu_features"), Lang.t("menu_settings"), Lang.t("menu_safety"),
-            Lang.t("menu_language"), Lang.t("menu_guide"))
+            Lang.t("menu_guide"))
         AlertDialog.Builder(this).setTitle(Lang.t("menu")).setItems(items) { _, i ->
             when (i) {
                 0 -> speaker.say(caps.describeFa())
                 1 -> startActivity(Intent(this, SettingsActivity::class.java))
                 2 -> speaker.say(SAFETY)
-                3 -> showLanguage()
-                4 -> speaker.say(if (Lang.code == "en") GUIDE_EN else GUIDE_FA)
+                3 -> speaker.say(if (Lang.code == "en") GUIDE_EN else GUIDE_FA)
             }
         }.setNegativeButton(Lang.t("close"), null).show()
-    }
-
-    private fun showLanguage() {
-        val labels = Lang.options.map { it.second }.toTypedArray()
-        val current = Lang.options.indexOfFirst { it.first == Lang.code }.coerceAtLeast(0)
-        AlertDialog.Builder(this).setTitle(Lang.t("pick_lang"))
-            .setSingleChoiceItems(labels, current) { d, which ->
-                val code = Lang.options[which].first
-                getSharedPreferences("ui", MODE_PRIVATE).edit().putString("lang", code).apply()
-                Lang.code = code
-                d.dismiss()
-                recreate()
-            }.setNegativeButton(Lang.t("close"), null).show()
     }
 
     // ---------- کجا هستم ----------
@@ -196,28 +187,51 @@ class MainActivity : Activity() {
             }
             .setNegativeButton(Lang.t("close"), null)
         if (file != null) b.setNeutralButton(tr("حذف", "Delete")) { _, _ -> RouteService.deleteSaved(file); speaker.say(tr("مسیر حذف شد.", "Route deleted.")) }
+        else b.setNeutralButton(tr("ذخیره مسیر", "Save route")) { _, _ -> RouteService.saveToLibrary(this, r); speaker.say(tr("مسیر ذخیره شد.", "Route saved.")) }
         b.show()
-        speaker.say(tr("مسیر ${if (isNew) "ساخته و ذخیره شد" else "ذخیره‌شده"}: ${r.destName}، حدود ${r.totalM} متر، ${r.steps.size} مرحله. جزئیات در صفحه است. برای رفتن دکمه شروع پیاده‌روی را بزنید.",
+        speaker.say(tr("مسیر ${if (isNew) "ساخته شد" else "ذخیره‌شده"}: ${r.destName}، حدود ${r.totalM} متر، ${r.steps.size} مرحله. جزئیات در صفحه است. برای رفتن، شروع پیاده‌روی را بزنید؛ برای نگه‌داشتن، ذخیره مسیر را بزنید.",
             "Route to ${r.destName}: ${r.totalM} m. Details on screen."))
     }
 
     private fun askDestination() {
         if (!settings.gpsEnabled) { speaker.say(tr("جی‌پی‌اس در دسترس نیست.", "GPS is not available.")); return }
         if (!ask(Manifest.permission.ACCESS_FINE_LOCATION, REQ_LOC)) return
-        val et = EditText(this).apply { hint = tr("مثلاً: میدان آزادی", "e.g. Azadi Square") }
-        AlertDialog.Builder(this).setTitle(tr("مقصد را بنویسید", "Enter destination")).setView(et)
-            .setPositiveButton(tr("مسیر", "Route")) { _, _ -> startRoute(et.text.toString().trim()) }
+        val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 16, 32, 0) }
+        val cb = android.widget.CheckBox(this).apply { text = tr("اختلال جی‌پی‌اس وجود دارد (مبدا را خودم می‌دهم)", "GPS is disrupted (I give the origin)") }
+        val org = EditText(this).apply { hint = tr("مبدا: مختصات مثل 35.7,51.4 یا نام مکان", "Origin: 35.7,51.4 or a place name"); visibility = android.view.View.GONE }
+        cb.setOnCheckedChangeListener { _, on -> org.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE }
+        val et = EditText(this).apply { hint = tr("مقصد، مثلاً: میدان آزادی", "Destination, e.g. Azadi Square") }
+        box.addView(cb); box.addView(org); box.addView(et)
+        AlertDialog.Builder(this).setTitle(tr("مسیر جدید", "New route")).setView(box)
+            .setPositiveButton(tr("مسیر", "Route")) { _, _ ->
+                startRoute(et.text.toString().trim(), if (cb.isChecked) org.text.toString().trim().ifEmpty { null } else null)
+            }
             .setNegativeButton(Lang.t("close"), null).show()
     }
 
-    private fun startRoute(name: String) {
+    private fun parseCoords(t: String): Pt? {
+        val m = Regex("""^\s*(-?\d+(?:\.\d+)?)\s*[,،\s]\s*(-?\d+(?:\.\d+)?)\s*$""").find(t.map { if (it in '۰'..'۹') '0' + (it - '۰') else it }.joinToString("")) ?: return null
+        val la = m.groupValues[1].toDouble(); val lo = m.groupValues[2].toDouble()
+        return if (la in -90.0..90.0 && lo in -180.0..180.0) Pt(la, lo) else null
+    }
+
+    private fun startRoute(name: String, originText: String?) {
         if (name.isEmpty()) return
         speaker.say(tr("در حال یافتن مسیر به $name. لطفاً صبر کنید.", "Finding route to $name."))
-        location.getOnce { here, msg ->
-            if (here == null) { speaker.say(msg); return@getOnce }
+        if (originText == null) {
+            location.getOnce { here, msg ->
+                if (here == null) { speaker.say(msg); return@getOnce }
+                buildRoute(Pt(here.latitude, here.longitude), name)
+            }
+        } else buildRoute(null, name, originText)
+    }
+
+    private fun buildRoute(here0: Pt?, name: String, originText: String? = null) {
             Thread {
                 var failMsg: String? = null
                 val r = try {
+                    val here = here0 ?: parseCoords(originText ?: "") ?: originText?.let { RouteService.geocode(this, it) }
+                    if (here == null) throw IllegalStateException(tr("مبدا نامعتبر است.", "Invalid origin."))
                     val dest = RouteService.geocode(this, name)
                     if (dest == null) {
                         failMsg = if (!Capabilities.internetNow(this)) tr("اینترنت وصل نیست؛ برای پیدا کردن مقصد لازم است.", "No internet; needed to find the destination.")
@@ -235,11 +249,27 @@ class MainActivity : Activity() {
                 }
                 runOnUiThread {
                     if (r == null) { speaker.say(failMsg ?: tr("مسیری پیدا نشد.", "No route found.")); return@runOnUiThread }
-                    RouteService.save(this, r)
-                    showRouteInfo(r, RouteService.saved(this).firstOrNull(), true)
+                    showRouteInfo(r, null, true)
                 }
             }.start()
-        }
+    }
+
+    private fun addNote() {
+        val r = route
+        if (r == null) { speaker.say(tr("ابتدا یک مسیر را شروع کنید.", "Start a route first.")); return }
+        val et = EditText(this).apply { hint = tr("متن یادداشت", "Note text") }
+        AlertDialog.Builder(this).setTitle(tr("یادداشت در این مکان", "Note at this place")).setView(et)
+            .setPositiveButton(tr("ذخیره", "Save")) { _, _ ->
+                val t = et.text.toString().trim()
+                if (t.isEmpty()) return@setPositiveButton
+                location.getOnce { l, msg ->
+                    if (l == null) { speaker.say(msg); return@getOnce }
+                    val n = Note(t, l.latitude, l.longitude)
+                    r.notes.add(n); announcedNotes.add(n)
+                    RouteService.save(this, r)
+                    speaker.say(tr("یادداشت ذخیره شد.", "Note saved."))
+                }
+            }.setNegativeButton(Lang.t("close"), null).show()
     }
 
     private fun endRoute(say: Boolean) {
@@ -265,6 +295,8 @@ class MainActivity : Activity() {
             }
             return
         }
+        for (n in r.notes) if (distTo(l, n.lat, n.lon) <= 20 && announcedNotes.add(n))
+            speaker.say(tr("یادداشت شما: ${n.text}", "Your note: ${n.text}"))
         val s = r.steps.getOrNull(stepIdx)
         if (s == null) { speaker.say(tr("به مقصد رسیدید.", "You have arrived.")); endRoute(false); return }
         val dist = distTo(l, s.lat, s.lon)
