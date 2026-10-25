@@ -47,6 +47,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var trackBtn: Button
     private lateinit var routeBtn: Button
+    private lateinit var noteBtn: Button
     private val handler = Handler(Looper.getMainLooper())
 
     // وضعیت جهت‌یابی پیوسته
@@ -92,7 +93,8 @@ class MainActivity : Activity() {
         col.addView(trackBtn)
         routeBtn = Ui.button(this, Lang.t("route")) { if (route != null) endRoute(true) else showRouteList() }
         col.addView(routeBtn)
-        col.addView(Ui.button(this, tr("یادداشت در این مکان", "Note at this place")) { addNote() })
+        noteBtn = Ui.button(this, tr("یادداشت در این مکان", "Note at this place")) { addNote() }
+        col.addView(noteBtn)
         col.addView(Ui.button(this, Lang.t("photo")) { takePhoto(false) })
         col.addView(Ui.button(this, Lang.t("obstacle")) { takePhoto(true) })
         setContentView(ScrollView(this).apply { addView(col) })
@@ -142,12 +144,13 @@ class MainActivity : Activity() {
                     else tr("نشانی پیدا نشد؛ شاید اینترنت وصل نیست. $msg", "Address not found. $msg")
                 speaker.say(base)
                 Thread {
-                    val places = try { ir.bna.assistant.route.Nearby.find(l.latitude, l.longitude) } catch (e: Exception) { AppLog.e("مکان‌های اطراف", e); null }
+                    var old = false
+                    val places = try { val r = ir.bna.assistant.route.Nearby.findCached(this, l.latitude, l.longitude); old = r.second; r.first } catch (e: Exception) { AppLog.e("مکان‌های اطراف", e); null }
                     runOnUiThread {
                         speaker.say(when {
                             places == null -> tr("اطلاعات مکان‌های اطراف دریافت نشد.", "Nearby places unavailable.")
                             places.isEmpty() -> tr("مکان نام‌داری در اطراف ثبت نشده است.", "No named places nearby.")
-                            else -> tr("اطراف شما: ", "Nearby: ") + places.joinToString("، ")
+                            else -> (if (old) tr("سرور جواب نداد؛ اطلاعات ذخیره‌شدهٔ قبلی: ", "Server down; saved data: ") else tr("اطراف شما: ", "Nearby: ")) + places.joinToString("، ")
                         })
                     }
                 }.start()
@@ -176,7 +179,17 @@ class MainActivity : Activity() {
     }
 
     private fun showRouteInfo(r: Route, file: java.io.File?, isNew: Boolean) {
-        val tv = TextView(this).apply { text = routeText(r); textSize = 16f; setTextIsSelectable(true); setPadding(32, 16, 32, 16) }
+        val tv = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            val lines = routeText(r).split("\n").filter { it.isNotBlank() }
+            lines.forEach { line ->
+                addView(TextView(context).apply { text = line; textSize = 16f; setTextIsSelectable(true); setPadding(32, 18, 32, 18) })
+                addView(android.view.View(context).apply {
+                    setBackgroundColor(0xFF888888.toInt()); importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                    layoutParams = LinearLayout.LayoutParams(-1, 3)
+                })
+            }
+        }
         val b = AlertDialog.Builder(this).setTitle(r.destName)
             .setView(ScrollView(this).apply { addView(tv) })
             .setPositiveButton(tr("شروع پیاده‌روی", "Start walking")) { _, _ ->
@@ -280,6 +293,7 @@ class MainActivity : Activity() {
     private fun setRouteBtn() {
         val t = if (route != null) Lang.t("route_stop") else Lang.t("route")
         routeBtn.text = t; routeBtn.contentDescription = t
+        noteBtn.visibility = if (route != null) android.view.View.VISIBLE else android.view.View.GONE
     }
 
     /** بررسی مسیر در هر دریافت موقعیت: خروج از مسیر، اعلام مرحله بعد، رسیدن */
