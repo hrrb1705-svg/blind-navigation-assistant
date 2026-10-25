@@ -57,18 +57,20 @@ object RouteService {
 
     fun fetch(from: Pt, to: Pt, destName: String): Route? {
         val tail = "${from.lon},${from.lat};${to.lon},${to.lat}?steps=true&geometries=geojson&overview=full"
-        val urls = listOf("https://routing.openstreetmap.de/routed-foot/route/v1/foot/$tail", "$OSRM$tail")
+        // فقط سرور پیاده؛ سرور عمومی OSRM همیشه مسیر خودرو می‌دهد و استفاده نمی‌شود
+        val foot = "https://routing.openstreetmap.de/routed-foot/route/v1/foot/$tail"
+        val urls = listOf(foot, foot, foot)
         var last: Exception? = null
         for (u in urls) {
             try {
                 val conn = (URL(u).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 10000; readTimeout = 20000
+                    connectTimeout = 10000; readTimeout = 25000
                     setRequestProperty("User-Agent", "ir.bna.assistant")
                 }
                 val body = try { conn.inputStream.bufferedReader().use { it.readText() } } finally { conn.disconnect() }
                 val r = parse(JSONObject(body), destName)
                 if (r != null) return r
-            } catch (e: Exception) { last = e }
+            } catch (e: Exception) { last = e; ir.bna.assistant.core.AppLog.e("مسیریابی پیاده", e) }
         }
         if (last != null) throw last
         return null

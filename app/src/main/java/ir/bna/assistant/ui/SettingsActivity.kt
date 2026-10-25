@@ -106,13 +106,25 @@ class SettingsActivity : Activity() {
         col.addView(Ui.button(this, "آزمایش اتصال هوش مصنوعی") { testAi() })
 
         col.addView(Ui.button(this, "خواندن گزارش خطاها") {
-            val errs = AppLog.read().lines().filter { "[ERROR]" in it }.takeLast(30)
+            val errs = AppLog.read().lines().filter { "[ERROR]" in it || "جزئیات" in it }.takeLast(60)
             val text = if (errs.isEmpty()) "خطایی ثبت نشده است." else errs.joinToString("\n\n")
-            val tv = android.widget.TextView(this).apply { this.text = text; textSize = 16f; setTextIsSelectable(true); setPadding(32, 16, 32, 16) }
-            android.app.AlertDialog.Builder(this).setTitle("خطاها (${errs.size})")
+            val tv = android.widget.LinearLayout(this).apply {
+                orientation = android.widget.LinearLayout.VERTICAL
+                val items = if (errs.isEmpty()) listOf(text) else errs
+                items.forEachIndexed { i, line ->
+                    addView(android.widget.TextView(context).apply {
+                        this.text = "${i + 1}. $line"; textSize = 16f; setTextIsSelectable(true); setPadding(32, 20, 32, 20)
+                    })
+                    addView(android.view.View(context).apply {
+                        setBackgroundColor(0xFF888888.toInt()); importantForAccessibility = android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                        layoutParams = android.widget.LinearLayout.LayoutParams(-1, 3)
+                    })
+                }
+            }
+            android.app.AlertDialog.Builder(this).setTitle("گزارش (${errs.size} ردیف)")
                 .setView(ScrollView(this).apply { addView(tv) })
                 .setPositiveButton("بستن", null).show()
-            speaker.say(if (errs.isEmpty()) text else "${errs.size} خطا ثبت شده است. متن در صفحه است؛ با انگشت بخوانید.")
+            speaker.say(if (errs.isEmpty()) text else "${errs.size} ردیف ثبت شده است. متن در صفحه است؛ با انگشت بخوانید.")
         })
         col.addView(Ui.button(this, "پاک کردن گزارش خطاها") { AppLog.clear(); speaker.say("گزارش پاک شد.") })
         col.addView(Ui.button(this, "زبان / Language") {

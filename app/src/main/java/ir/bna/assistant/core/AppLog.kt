@@ -28,6 +28,6 @@ object AppLog {
         } catch (_: Exception) { }
     }
 
-    fun read(): String = try { file?.readText()?.takeLast(3000) ?: "" } catch (e: Exception) { "" }
+    fun read(): String = try { file?.readText()?.takeLast(30000) ?: "" } catch (e: Exception) { "" }
     fun clear() { try { file?.writeText("") } catch (_: Exception) { } }
 }
