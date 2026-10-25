@@ -75,14 +75,14 @@ class MainActivity : Activity() {
         router = ProcessingRouter(LocalBasicAnalyzer(), RemoteAnalyzer(settings) { Capabilities.internetNow(this) }) { settings.processingMode }
         route = RouteService.load(this)
 
-        // ردیف بالا: عنوان در چپ، دکمه منو در راست
+        // ردیف بالا: دکمه منو در راست (چیدمان RTL: اولین عنصر راست است)، عنوان در چپ
         val top = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
-        top.addView(TextView(this).apply { text = Lang.t("title"); textSize = 20f },
-            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         top.addView(Ui.button(this, Lang.t("menu")) { showMenu() }.apply {
             textSize = 16f; minHeight = 0; minimumHeight = 0
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
         })
+        top.addView(TextView(this).apply { text = Lang.t("title"); textSize = 20f },
+            LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
 
         val col = Ui.column(this)
         status = Ui.status(this)
@@ -144,12 +144,13 @@ class MainActivity : Activity() {
                     else tr("نشانی پیدا نشد؛ شاید اینترنت وصل نیست. $msg", "Address not found. $msg")
                 speaker.say(base)
                 Thread {
-                    val places = try { ir.bna.assistant.route.Nearby.find(l.latitude, l.longitude) } catch (e: Exception) { AppLog.e("مکان‌های اطراف", e); null }
+                    var old = false
+                    val places = try { val r = ir.bna.assistant.route.Nearby.findCached(this, l.latitude, l.longitude); old = r.second; r.first } catch (e: Exception) { AppLog.e("مکان‌های اطراف", e); null }
                     runOnUiThread {
                         speaker.say(when {
                             places == null -> tr("اطلاعات مکان‌های اطراف دریافت نشد.", "Nearby places unavailable.")
                             places.isEmpty() -> tr("مکان نام‌داری در اطراف ثبت نشده است.", "No named places nearby.")
-                            else -> tr("اطراف شما: ", "Nearby: ") + places.joinToString("، ")
+                            else -> (if (old) tr("سرور جواب نداد؛ اطلاعات ذخیره‌شدهٔ قبلی: ", "Server down; saved data: ") else tr("اطراف شما: ", "Nearby: ")) + places.joinToString("، ")
                         })
                     }
                 }.start()

@@ -13,7 +13,55 @@ object Nearby {
         "https://overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
         "https://overpass.private.coffee/api/interpreter",
-        "https://maps.mail.ru/osm/tools/overpass/api/interpreter")
+        "https://overpass.osm.jp/api/interpreter",
+        "https://overpass.openstreetmap.fr/api/interpreter")
+
+    private fun cacheFile(ctx: android.content.Context) = java.io.File(ctx.filesDir, "nearby_cache.json")
+
+    private fun dist(la1: Double, lo1: Double, la2: Double, lo2: Double): Int {
+        val dx = (lo2 - lo1) * cos(Math.toRadians(la1)) * 111320.0; val dy = (la2 - la1) * 110540.0
+        return sqrt(dx * dx + dy * dy).toInt()
+    }
+
+    private fun saveCache(ctx: android.content.Context, lat: Double, lon: Double, items: List<Triple<String, Double, Double>>) {
+        try {
+            val f = cacheFile(ctx)
+            val all = try { org.json.JSONArray(f.readText()) } catch (e: Exception) { org.json.JSONArray() }
+            val keep = org.json.JSONArray()
+            for (i in 0 until all.length()) { val o = all.getJSONObject(i); if (dist(lat, lon, o.getDouble("lat"), o.getDouble("lon")) > 30) keep.put(o) }
+            val arr = org.json.JSONArray()
+            items.forEach { arr.put(JSONObject().put("n", it.first).put("la", it.second).put("lo", it.third)) }
+            keep.put(JSONObject().put("lat", lat).put("lon", lon).put("t", System.currentTimeMillis()).put("items", arr))
+            val out = org.json.JSONArray()
+            for (i in maxOf(0, keep.length() - 30) until keep.length()) out.put(keep.get(i))
+            f.writeText(out.toString())
+        } catch (e: Exception) { ir.bna.assistant.core.AppLog.e("ذخیره حافظه مکان‌ها", e) }
+    }
+
+    private fun loadCache(ctx: android.content.Context, lat: Double, lon: Double): List<String>? {
+        try {
+            val all = org.json.JSONArray(cacheFile(ctx).readText())
+            var best: JSONObject? = null; var bd = 101
+            for (i in 0 until all.length()) { val o = all.getJSONObject(i); val d = dist(lat, lon, o.getDouble("lat"), o.getDouble("lon")); if (d < bd) { bd = d; best = o } }
+            val items = best?.getJSONArray("items") ?: return null
+            val out = ArrayList<Pair<Int, String>>()
+            for (i in 0 until items.length()) {
+                val o = items.getJSONObject(i)
+                val d = dist(lat, lon, o.getDouble("la"), o.getDouble("lo"))
+                out.add(d to (o.getString("n") + " در $d متری"))
+            }
+            return out.sortedBy { it.first }.take(5).map { it.second }
+        } catch (e: Exception) { return null }
+    }
+
+    /** با سرور؛ در شکست، از حافظهٔ گوشی (second=true یعنی قدیمی) */
+    fun findCached(ctx: android.content.Context, lat: Double, lon: Double, radius: Int = 150): Pair<List<String>, Boolean> {
+        try { return find(ctx, lat, lon, radius) to false } catch (e: Exception) {
+            val c = loadCache(ctx, lat, lon)
+            if (c != null && c.isNotEmpty()) { ir.bna.assistant.core.AppLog.i("جزئیات: سرور جواب نداد؛ نتیجهٔ ذخیره‌شده استفاده شد"); return c to true }
+            throw e
+        }
+    }
 
     private val TYPES = mapOf(
         "bank" to "بانک", "pharmacy" to "داروخانه", "hospital" to "بیمارستان", "clinic" to "درمانگاه",
@@ -25,20 +73,21 @@ object Nearby {
         "subway_entrance" to "ورودی مترو", "government" to "اداره دولتی", "hotel" to "هتل",
         "dentist" to "دندانپزشکی", "doctors" to "مطب", "kindergarten" to "مهدکودک", "library" to "کتابخانه")
 
-    fun find(lat: Double, lon: Double, radius: Int = 150): List<String> {
+    fun find(ctx: android.content.Context, lat: Double, lon: Double, radius: Int = 150): List<String> {
         val keys = listOf("amenity", "shop", "office", "tourism", "leisure", "highway", "railway")
-        val q = "[out:json][timeout:12];(" + keys.joinToString("") { "nwr(around:$radius,$lat,$lon)[\"$it\"][\"name\"];" } + ");out center 60;"
+        val q = "[out:json][timeout:10];(" + keys.joinToString("") { "nwr(around:$radius,$lat,$lon)[\"$it\"][\"name\"];" } + ");out center 60;"
         var body: String? = null
         var last: Exception? = null
         val log = ir.bna.assistant.core.AppLog
         log.i("جزئیات مکان‌های اطراف: lat=$lat lon=$lon شعاع=$radius متر؛ پرس‌وجو ${q.length} نویسه")
-        for (s in SERVERS) {
+        for (s in listOf(SERVERS[0]) + SERVERS) {
+            if (body != null) break
             val host = java.net.URI(s).host
             val t0 = System.currentTimeMillis()
             try {
                 val c = (URL(s).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"; doOutput = true
-                    connectTimeout = 8000; readTimeout = 16000
+                    connectTimeout = 6000; readTimeout = 12000
                     setRequestProperty("User-Agent", "ir.bna.assistant")
                 }
                 c.outputStream.use { it.write(("data=" + URLEncoder.encode(q, "UTF-8")).toByteArray()) }
@@ -59,6 +108,7 @@ object Nearby {
         log.i("جزئیات: ${els.length()} عنصر از سرور آمد")
         val seen = HashSet<String>()
         val out = ArrayList<Pair<Int, String>>()
+        val raw = ArrayList<Triple<String, Double, Double>>()
         for (i in 0 until els.length()) {
             val e = els.getJSONObject(i)
             val tags = e.optJSONObject("tags") ?: continue
@@ -71,8 +121,11 @@ object Nearby {
             val kind = listOf("amenity", "shop", "office", "tourism", "leisure", "highway", "railway")
                 .firstNotNullOfOrNull { k -> tags.optString(k).takeIf { it.isNotEmpty() } }
             val fa = kind?.let { TYPES[it] }
-            out.add(d to ((if (fa != null) "$fa $name" else name) + " در $d متری"))
+            val label = if (fa != null) "$fa $name" else name
+            out.add(d to "$label در $d متری")
+            raw.add(Triple(label, la, lo))
         }
+        saveCache(ctx, lat, lon, raw)
         return out.sortedBy { it.first }.take(5).map { it.second }
     }
 }
