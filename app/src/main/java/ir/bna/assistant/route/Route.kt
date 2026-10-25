@@ -24,7 +24,6 @@ class Route(val destName: String, val points: List<Pt>, val steps: List<Step>, v
  * نقشه‌ی گرافیکی نیست؛ خروجی، مراحل متنی و فایل متنی قابل خواندن است.
  */
 object RouteService {
-    private const val OSRM = "https://router.project-osrm.org/route/v1/foot/"
     private const val FILE = "route.json"
     const val OFF_ROUTE_M = 40.0
 
@@ -57,9 +56,9 @@ object RouteService {
 
     fun fetch(from: Pt, to: Pt, destName: String): Route? {
         val tail = "${from.lon},${from.lat};${to.lon},${to.lat}?steps=true&geometries=geojson&overview=full"
-        // فقط سرور پیاده؛ سرور عمومی OSRM همیشه مسیر خودرو می‌دهد و استفاده نمی‌شود
-        val foot = "https://routing.openstreetmap.de/routed-foot/route/v1/foot/$tail"
-        val urls = listOf(foot, foot, foot)
+        // سرور پیاده‌ی FOSSGIS؛ نام پروفایل در نشانی نادیده گرفته می‌شود، پس هر دو شکل را امتحان می‌کنیم
+        val base = "https://routing.openstreetmap.de/routed-foot/route/v1/"
+        val urls = listOf(base + "foot/" + tail, base + "driving/" + tail, base + "foot/" + tail)
         var last: Exception? = null
         for (u in urls) {
             try {
@@ -68,12 +67,23 @@ object RouteService {
                     setRequestProperty("User-Agent", "ir.bna.assistant")
                 }
                 val body = try { conn.inputStream.bufferedReader().use { it.readText() } } finally { conn.disconnect() }
-                val r = parse(JSONObject(body), destName)
+                val j = JSONObject(body)
+                if (!isWalking(j)) { ir.bna.assistant.core.AppLog.e("مسیریابی", java.io.IOException("پاسخ مسیر خودرو بود و رد شد")); continue }
+                val r = parse(j, destName)
                 if (r != null) return r
             } catch (e: Exception) { last = e; ir.bna.assistant.core.AppLog.e("مسیریابی پیاده", e) }
         }
         if (last != null) throw last
         return null
+    }
+
+    /** سرعت میانگین مسیر را می‌سنجد: پیاده حدود ۵ کیلومتر در ساعت است، خودرو چند برابر */
+    private fun isWalking(j: JSONObject): Boolean {
+        if (j.optString("code") != "Ok") return true
+        val r = j.getJSONArray("routes").getJSONObject(0)
+        val d = r.optDouble("distance"); val t = r.optDouble("duration")
+        if (d < 300 || t <= 0) return true
+        return d / t < 2.8 // متر بر ثانیه؛ بالاتر از حدود ۱۰ کیلومتر در ساعت یعنی خودرو
     }
 
     private fun parse(j: JSONObject, destName: String): Route? {

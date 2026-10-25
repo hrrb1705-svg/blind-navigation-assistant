@@ -1,5 +1,6 @@
 package ir.bna.assistant.ui
 
+import android.view.ViewGroup
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
@@ -190,18 +191,28 @@ class MainActivity : Activity() {
                 })
             }
         }
-        val b = AlertDialog.Builder(this).setTitle(r.destName)
-            .setView(ScrollView(this).apply { addView(tv) })
-            .setPositiveButton(tr("شروع پیاده‌روی", "Start walking")) { _, _ ->
-                route = r; stepIdx = 0; announcedIdx = -1
-                RouteService.save(this, r); setRouteBtn()
-                speaker.say(tr("شروع مسیر به ${r.destName}. ", "Starting route. ") + (r.steps.firstOrNull()?.text ?: ""))
-                if (!location.isTracking) startTracking(announce = false)
-            }
-            .setNegativeButton(Lang.t("close"), null)
-        if (file != null) b.setNeutralButton(tr("حذف", "Delete")) { _, _ -> RouteService.deleteSaved(file); speaker.say(tr("مسیر حذف شد.", "Route deleted.")) }
-        else b.setNeutralButton(tr("ذخیره مسیر", "Save route")) { _, _ -> RouteService.saveToLibrary(this, r); speaker.say(tr("مسیر ذخیره شد.", "Route saved.")) }
-        b.show()
+        // دکمه‌ها داخل خود صفحه و زیر فهرست هستند تا با طولانی بودن مراحل از صفحه بیرون نروند
+        val dlg = AlertDialog.Builder(this).setTitle(r.destName).create()
+        fun btn(label: String, onClick: () -> Unit) = android.widget.Button(this).apply {
+            text = label; setOnClickListener { dlg.dismiss(); onClick() }
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(24, 6, 24, 6) }
+        }
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = ViewGroup.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.75).toInt())
+        }
+        root.addView(ScrollView(this).apply { addView(tv) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(btn(tr("شروع پیاده‌روی", "Start walking")) {
+            route = r; stepIdx = 0; announcedIdx = -1
+            RouteService.save(this, r); setRouteBtn()
+            speaker.say(tr("شروع مسیر به ${r.destName}. ", "Starting route. ") + (r.steps.firstOrNull()?.text ?: ""))
+            if (!location.isTracking) startTracking(announce = false)
+        })
+        if (file != null) root.addView(btn(tr("حذف", "Delete")) { RouteService.deleteSaved(file); speaker.say(tr("مسیر حذف شد.", "Route deleted.")) })
+        else root.addView(btn(tr("ذخیره مسیر", "Save route")) { RouteService.saveToLibrary(this, r); speaker.say(tr("مسیر ذخیره شد.", "Route saved.")) })
+        root.addView(btn(Lang.t("close")) {})
+        dlg.setView(root)
+        dlg.show()
         speaker.say(tr("مسیر ${if (isNew) "ساخته شد" else "ذخیره‌شده"}: ${r.destName}، حدود ${r.totalM} متر، ${r.steps.size} مرحله. جزئیات در صفحه است. برای رفتن، شروع پیاده‌روی را بزنید؛ برای نگه‌داشتن، ذخیره مسیر را بزنید.",
             "Route to ${r.destName}: ${r.totalM} m. Details on screen."))
     }
