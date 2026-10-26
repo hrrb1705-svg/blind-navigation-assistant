@@ -10,11 +10,12 @@ import kotlin.math.sqrt
 /** مکان‌های اطراف از OpenStreetMap (Overpass)؛ رایگان. باید در Thread اجرا شود */
 object Nearby {
     private val SERVERS = listOf(
+        "https://overpass.openstreetmap.fr/api/interpreter",
         "https://overpass-api.de/api/interpreter",
         "https://overpass.kumi.systems/api/interpreter",
         "https://overpass.private.coffee/api/interpreter",
-        "https://overpass.osm.jp/api/interpreter",
-        "https://overpass.openstreetmap.fr/api/interpreter")
+        "https://overpass.osm.jp/api/interpreter"
+        )
 
     private fun cacheFile(ctx: android.content.Context) = java.io.File(ctx.filesDir, "nearby_cache.json")
 

@@ -20,7 +20,7 @@ class Route(val destName: String, val points: List<Pt>, val steps: List<Step>, v
             val notes: MutableList<Note> = mutableListOf())
 
 /**
- * مسیریابی پیاده با OSRM عمومی (رایگان) و ذخیره‌ی روی گوشی.
+ * مسیریابی پیاده با Valhalla عمومی (رایگان) و ذخیره‌ی روی گوشی.
  * نقشه‌ی گرافیکی نیست؛ خروجی، مراحل متنی و فایل متنی قابل خواندن است.
  */
 object RouteService {
@@ -54,61 +54,78 @@ object RouteService {
     /** مسیر پیاده از مبدا به مقصد؛ باید در Thread اجرا شود */
     fun fetch(from: Location, to: Pt, destName: String): Route? = fetch(Pt(from.latitude, from.longitude), to, destName)
 
+    // Valhalla با حالت pedestrian: فقط مسیر عابر می‌دهد و یک‌طرفه‌ی خودرو را اعمال نمی‌کند
+    private val VALHALLA = listOf(
+        "https://valhalla1.openstreetmap.de/route",
+        "https://valhalla.openstreetmap.de/route")
+
     fun fetch(from: Pt, to: Pt, destName: String): Route? {
-        val tail = "${from.lon},${from.lat};${to.lon},${to.lat}?steps=true&geometries=geojson&overview=full"
-        // سرور پیاده‌ی FOSSGIS؛ نام پروفایل در نشانی نادیده گرفته می‌شود، پس هر دو شکل را امتحان می‌کنیم
-        val base = "https://routing.openstreetmap.de/routed-foot/route/v1/"
-        val urls = listOf(base + "foot/" + tail, base + "driving/" + tail, base + "foot/" + tail)
+        val req = JSONObject()
+            .put("locations", JSONArray()
+                .put(JSONObject().put("lat", from.lat).put("lon", from.lon))
+                .put(JSONObject().put("lat", to.lat).put("lon", to.lon)))
+            .put("costing", "pedestrian")
+            .put("directions_options", JSONObject().put("units", "kilometers"))
+            .toString()
         var last: Exception? = null
-        for (u in urls) {
+        for (u in VALHALLA) {
             try {
                 val conn = (URL(u).openConnection() as HttpURLConnection).apply {
                     connectTimeout = 10000; readTimeout = 25000
+                    requestMethod = "POST"; doOutput = true
                     setRequestProperty("User-Agent", "ir.bna.assistant")
+                    setRequestProperty("Content-Type", "application/json")
                 }
+                conn.outputStream.use { it.write(req.toByteArray()) }
                 val body = try { conn.inputStream.bufferedReader().use { it.readText() } } finally { conn.disconnect() }
-                val j = JSONObject(body)
-                if (!isWalking(j)) { ir.bna.assistant.core.AppLog.e("مسیریابی", java.io.IOException("پاسخ مسیر خودرو بود و رد شد")); continue }
-                val r = parse(j, destName)
+                val r = parse(JSONObject(body), destName)
                 if (r != null) return r
-            } catch (e: Exception) { last = e; ir.bna.assistant.core.AppLog.e("مسیریابی پیاده", e) }
+            } catch (e: Exception) { last = e; ir.bna.assistant.core.AppLog.e("مسیریابی پیاده (Valhalla)", e) }
         }
         if (last != null) throw last
         return null
     }
 
-    /** سرعت میانگین مسیر را می‌سنجد: پیاده حدود ۵ کیلومتر در ساعت است، خودرو چند برابر */
-    private fun isWalking(j: JSONObject): Boolean {
-        if (j.optString("code") != "Ok") return true
-        val r = j.getJSONArray("routes").getJSONObject(0)
-        val d = r.optDouble("distance"); val t = r.optDouble("duration")
-        if (d < 300 || t <= 0) return true
-        return d / t < 2.8 // متر بر ثانیه؛ بالاتر از حدود ۱۰ کیلومتر در ساعت یعنی خودرو
+    private fun decodeShape(str: String): List<Pt> {
+        val out = ArrayList<Pt>(); var i = 0; var la = 0; var lo = 0
+        while (i < str.length) {
+            var sh = 0; var res = 0; var b: Int
+            do { b = str[i++].code - 63; res = res or ((b and 31) shl sh); sh += 5 } while (b >= 32)
+            la += if (res and 1 != 0) (res shr 1).inv() else res shr 1
+            sh = 0; res = 0
+            do { b = str[i++].code - 63; res = res or ((b and 31) shl sh); sh += 5 } while (b >= 32)
+            lo += if (res and 1 != 0) (res shr 1).inv() else res shr 1
+            out.add(Pt(la / 1e6, lo / 1e6))
+        }
+        return out
     }
 
     private fun parse(j: JSONObject, destName: String): Route? {
-        if (j.optString("code") != "Ok") return null
-        val r = j.getJSONArray("routes").getJSONObject(0)
-        val coords = r.getJSONObject("geometry").getJSONArray("coordinates")
-        val pts = (0 until coords.length()).map { i ->
-            val c = coords.getJSONArray(i); Pt(c.getDouble(1), c.getDouble(0))
-        }
+        val trip = j.optJSONObject("trip") ?: return null
+        if (trip.optInt("status", 0) != 0) return null
+        val leg = trip.getJSONArray("legs").getJSONObject(0)
+        val pts = decodeShape(leg.getString("shape"))
+        if (pts.size < 2) return null
+        val ms = leg.getJSONArray("maneuvers")
         val steps = mutableListOf<Step>()
-        val legs = r.getJSONArray("legs")
-        for (li in 0 until legs.length()) {
-            val ss = legs.getJSONObject(li).getJSONArray("steps")
-            for (si in 0 until ss.length()) {
-                val s = ss.getJSONObject(si)
-                val m = s.getJSONObject("maneuver")
-                val loc = m.getJSONArray("location")
-                val name = s.optString("name")
-                steps.add(Step(
-                    text = instructionFa(m.optString("type"), m.optString("modifier"), name),
-                    lat = loc.getDouble(1), lon = loc.getDouble(0),
-                    meters = s.optDouble("distance").toInt()))
+        for (i in 0 until ms.length()) {
+            val m = ms.getJSONObject(i)
+            val names = m.optJSONArray("street_names")
+            val name = if (names != null && names.length() > 0) names.getString(0) else ""
+            val (type, mod) = when (m.optInt("type")) {
+                1, 2, 3 -> "depart" to ""
+                4, 5, 6 -> "arrive" to ""
+                9 -> "turn" to "slight right"; 10 -> "turn" to "right"; 11 -> "turn" to "sharp right"
+                12, 13 -> "turn" to "uturn"
+                14 -> "turn" to "sharp left"; 15 -> "turn" to "left"; 16 -> "turn" to "slight left"
+                26, 27 -> "roundabout" to ""
+                else -> "continue" to ""
             }
+            val p = pts[m.optInt("begin_shape_index").coerceIn(0, pts.size - 1)]
+            steps.add(Step(instructionFa(type, mod, name), p.lat, p.lon, (m.optDouble("length") * 1000).toInt()))
         }
-        return Route(destName, pts, steps, r.optDouble("distance").toInt())
+        val total = (trip.getJSONObject("summary").optDouble("length") * 1000).toInt()
+        return Route(destName, pts, steps, total)
     }
 
     fun instructionFa(type: String, modifier: String, name: String): String {
