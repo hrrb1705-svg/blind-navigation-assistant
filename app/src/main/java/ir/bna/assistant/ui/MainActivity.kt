@@ -1,6 +1,7 @@
 package ir.bna.assistant.ui
 
 import android.view.ViewGroup
+import java.util.Locale
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
@@ -141,7 +142,7 @@ class MainActivity : Activity() {
         location.getOnce { l, msg ->
             if (l == null) { speaker.say(msg); return@getOnce }
             location.address(l) { addr ->
-                val base = if (addr != null) tr("نزدیک $addr. ${LocationModule.accuracyFa(l)}", "Near $addr.")
+                val base = if (addr != null) tr("نزدیک $addr. ${LocationModule.describe(l)}", "Near $addr. ${LocationModule.describe(l)}")
                     else tr("نشانی پیدا نشد؛ شاید اینترنت وصل نیست. $msg", "Address not found. $msg")
                 speaker.say(base)
                 Thread {
@@ -195,22 +196,25 @@ class MainActivity : Activity() {
         val dlg = AlertDialog.Builder(this).setTitle(r.destName).create()
         fun btn(label: String, onClick: () -> Unit) = android.widget.Button(this).apply {
             text = label; setOnClickListener { dlg.dismiss(); onClick() }
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(24, 6, 24, 6) }
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(8, 6, 8, 6) }
         }
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             layoutParams = ViewGroup.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.75).toInt())
         }
         root.addView(ScrollView(this).apply { addView(tv) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        root.addView(btn(tr("شروع پیاده‌روی", "Start walking")) {
+        val startBtn = btn(tr("شروع پیاده‌روی", "Start walking")) {
             route = r; stepIdx = 0; announcedIdx = -1
             RouteService.save(this, r); setRouteBtn()
             speaker.say(tr("شروع مسیر به ${r.destName}. ", "Starting route. ") + (r.steps.firstOrNull()?.text ?: ""))
             if (!location.isTracking) startTracking(announce = false)
-        })
-        if (file != null) root.addView(btn(tr("حذف", "Delete")) { RouteService.deleteSaved(file); speaker.say(tr("مسیر حذف شد.", "Route deleted.")) })
-        else root.addView(btn(tr("ذخیره مسیر", "Save route")) { RouteService.saveToLibrary(this, r); speaker.say(tr("مسیر ذخیره شد.", "Route saved.")) })
-        root.addView(btn(Lang.t("close")) {})
+        }.apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(24, 6, 24, 6) } }
+        root.addView(startBtn)
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL }
+        if (file != null) row.addView(btn(tr("حذف", "Delete")) { RouteService.deleteSaved(file); speaker.say(tr("مسیر حذف شد.", "Route deleted.")) })
+        else row.addView(btn(tr("ذخیره مسیر", "Save route")) { RouteService.saveToLibrary(this, r); speaker.say(tr("مسیر ذخیره شد.", "Route saved.")) })
+        row.addView(btn(Lang.t("close")) {})
+        root.addView(row, LinearLayout.LayoutParams(-1, -2))
         dlg.setView(root)
         dlg.show()
         speaker.say(tr("مسیر ${if (isNew) "ساخته شد" else "ذخیره‌شده"}: ${r.destName}، حدود ${r.totalM} متر، ${r.steps.size} مرحله. جزئیات در صفحه است. برای رفتن، شروع پیاده‌روی را بزنید؛ برای نگه‌داشتن، ذخیره مسیر را بزنید.",
@@ -221,16 +225,32 @@ class MainActivity : Activity() {
         if (!settings.gpsEnabled) { speaker.say(tr("جی‌پی‌اس در دسترس نیست.", "GPS is not available.")); return }
         if (!ask(Manifest.permission.ACCESS_FINE_LOCATION, REQ_LOC)) return
         val box = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(32, 16, 32, 0) }
-        val cb = android.widget.CheckBox(this).apply { text = tr("اختلال جی‌پی‌اس وجود دارد (مبدا را خودم می‌دهم)", "GPS is disrupted (I give the origin)") }
-        val org = EditText(this).apply { hint = tr("مبدا: مختصات مثل 35.7,51.4 یا نام مکان", "Origin: 35.7,51.4 or a place name"); visibility = android.view.View.GONE }
-        cb.setOnCheckedChangeListener { _, on -> org.visibility = if (on) android.view.View.VISIBLE else android.view.View.GONE }
-        val et = EditText(this).apply { hint = tr("مقصد، مثلاً: میدان آزادی", "Destination, e.g. Azadi Square") }
-        box.addView(cb); box.addView(org); box.addView(et)
-        AlertDialog.Builder(this).setTitle(tr("مسیر جدید", "New route")).setView(box)
-            .setPositiveButton(tr("مسیر", "Route")) { _, _ ->
-                startRoute(et.text.toString().trim(), if (cb.isChecked) org.text.toString().trim().ifEmpty { null } else null)
+        val org = EditText(this).apply {
+            hint = tr("مبدا: مختصات مثل 35.7,51.4 یا نام مکان؛ خالی یعنی مکان فعلی", "Origin: 35.7,51.4 or a place; empty = current location")
+        }
+        val dlg = AlertDialog.Builder(this).setTitle(tr("مسیر جدید", "New route")).create()
+        val here = android.widget.Button(this).apply {
+            text = tr("مکان فعلی من", "My current location")
+            setOnClickListener {
+                speaker.say(tr("در حال دریافت مکان فعلی.", "Getting current location."))
+                location.getOnce { l, msg ->
+                    if (l == null) { speaker.say(msg); return@getOnce }
+                    org.setText("%.6f,%.6f".format(Locale.US, l.latitude, l.longitude))
+                    speaker.say(tr("مختصات مکان فعلی در کادر مبدا ثبت شد.", "Current coordinates entered."))
+                }
             }
-            .setNegativeButton(Lang.t("close"), null).show()
+        }
+        val et = EditText(this).apply { hint = tr("مقصد، مثلاً: میدان آزادی", "Destination, e.g. Azadi Square") }
+        box.addView(org); box.addView(here); box.addView(et)
+        val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL }
+        fun rb(t: String, f: () -> Unit) = android.widget.Button(this).apply {
+            text = t; setOnClickListener { dlg.dismiss(); f() }
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(8, 6, 8, 6) }
+        }
+        row.addView(rb(tr("مسیر", "Route")) { startRoute(et.text.toString().trim(), org.text.toString().trim().ifEmpty { null }) })
+        row.addView(rb(Lang.t("close")) {})
+        box.addView(row)
+        dlg.setView(box); dlg.show()
     }
 
     private fun parseCoords(t: String): Pt? {
