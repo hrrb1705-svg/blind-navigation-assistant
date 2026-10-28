@@ -50,6 +50,7 @@ class MainActivity : Activity() {
     private lateinit var trackBtn: Button
     private lateinit var routeBtn: Button
     private lateinit var noteBtn: Button
+    private lateinit var routeRow: LinearLayout
     private val handler = Handler(Looper.getMainLooper())
 
     // وضعیت جهت‌یابی پیوسته
@@ -65,6 +66,7 @@ class MainActivity : Activity() {
     private val announcedObs = mutableSetOf<Long>()
     private val announcedNotes = mutableSetOf<Note>()
     private var pendingObstacle = false
+    private var pendingRouteNote = false
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -95,10 +97,27 @@ class MainActivity : Activity() {
         col.addView(trackBtn)
         routeBtn = Ui.button(this, Lang.t("route")) { if (route != null) endRoute(true) else showRouteList() }
         col.addView(routeBtn)
-        noteBtn = Ui.button(this, tr("یادداشت در این مکان", "Note at this place")) { addNote() }
-        col.addView(noteBtn)
-        col.addView(Ui.button(this, Lang.t("photo")) { takePhoto(false) })
-        col.addView(Ui.button(this, Lang.t("obstacle")) { takePhoto(true) })
+        // ردیف پایین صفحه اصلی: توصیف عکس
+        col.addView(LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL
+            addView(Ui.button(this@MainActivity, Lang.t("photo")) { takePhoto(false) }.apply {
+                layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(8, 12, 8, 12) }
+            })
+        })
+        // ردیف صفحه پیاده‌روی (فقط وقتی مسیر فعال است): افزودن متن، توصیف عکس، ثبت مانع
+        routeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL
+            visibility = android.view.View.GONE
+        }
+        fun rowBtn(t: String, f: () -> Unit) = android.widget.Button(this).apply {
+            text = t; contentDescription = t; setOnClickListener { f() }
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(8, 12, 8, 12) }
+        }
+        noteBtn = rowBtn(tr("افزودن متن", "Add text")) { addNote() }
+        routeRow.addView(noteBtn)
+        routeRow.addView(rowBtn(Lang.t("photo")) { takePhoto(false, forRoute = true) })
+        routeRow.addView(rowBtn(Lang.t("obstacle")) { takePhoto(true) })
+        col.addView(routeRow)
         setContentView(ScrollView(this).apply { addView(col) })
         setRouteBtn()
 
@@ -229,25 +248,18 @@ class MainActivity : Activity() {
             hint = tr("مبدا: مختصات مثل 35.7,51.4 یا نام مکان؛ خالی یعنی مکان فعلی", "Origin: 35.7,51.4 or a place; empty = current location")
         }
         val dlg = AlertDialog.Builder(this).setTitle(tr("مسیر جدید", "New route")).create()
-        val here = android.widget.Button(this).apply {
-            text = tr("مکان فعلی من", "My current location")
-            setOnClickListener {
-                speaker.say(tr("در حال دریافت مکان فعلی.", "Getting current location."))
-                location.getOnce { l, msg ->
-                    if (l == null) { speaker.say(msg); return@getOnce }
-                    org.setText("%.6f,%.6f".format(Locale.US, l.latitude, l.longitude))
-                    speaker.say(tr("مختصات مکان فعلی در کادر مبدا ثبت شد.", "Current coordinates entered."))
-                }
-            }
-        }
         val et = EditText(this).apply { hint = tr("مقصد، مثلاً: میدان آزادی", "Destination, e.g. Azadi Square") }
-        box.addView(org); box.addView(here); box.addView(et)
+        val label = EditText(this).apply { hint = tr("نام مسیر (اختیاری؛ خالی یعنی نام مقصد)", "Route name (optional; empty = destination)") }
+        box.addView(org); box.addView(et); box.addView(label)
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL }
         fun rb(t: String, f: () -> Unit) = android.widget.Button(this).apply {
             text = t; setOnClickListener { dlg.dismiss(); f() }
             layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(8, 6, 8, 6) }
         }
-        row.addView(rb(tr("مسیر", "Route")) { startRoute(et.text.toString().trim(), org.text.toString().trim().ifEmpty { null }) })
+        row.addView(rb(tr("مسیر", "Route")) {
+            val dest = et.text.toString().trim()
+            startRoute(dest, org.text.toString().trim().ifEmpty { null }, label.text.toString().trim().ifEmpty { dest })
+        })
         row.addView(rb(Lang.t("close")) {})
         box.addView(row)
         dlg.setView(box); dlg.show()
@@ -259,18 +271,18 @@ class MainActivity : Activity() {
         return if (la in -90.0..90.0 && lo in -180.0..180.0) Pt(la, lo) else null
     }
 
-    private fun startRoute(name: String, originText: String?) {
+    private fun startRoute(name: String, originText: String?, label: String = name) {
         if (name.isEmpty()) return
         speaker.say(tr("در حال یافتن مسیر به $name. لطفاً صبر کنید.", "Finding route to $name."))
         if (originText == null) {
             location.getOnce { here, msg ->
                 if (here == null) { speaker.say(msg); return@getOnce }
-                buildRoute(Pt(here.latitude, here.longitude), name)
+                buildRoute(Pt(here.latitude, here.longitude), name, null, label)
             }
-        } else buildRoute(null, name, originText)
+        } else buildRoute(null, name, originText, label)
     }
 
-    private fun buildRoute(here0: Pt?, name: String, originText: String? = null) {
+    private fun buildRoute(here0: Pt?, name: String, originText: String? = null, label: String = name) {
             Thread {
                 var failMsg: String? = null
                 val r = try {
@@ -281,7 +293,7 @@ class MainActivity : Activity() {
                         failMsg = if (!Capabilities.internetNow(this)) tr("اینترنت وصل نیست؛ برای پیدا کردن مقصد لازم است.", "No internet; needed to find the destination.")
                         else tr("مقصد پیدا نشد. نام را کامل‌تر بنویسید، مثلاً همراه با نام شهر.", "Destination not found. Write a fuller name with the city.")
                         null
-                    } else RouteService.fetch(here, dest, name) ?: run {
+                    } else RouteService.fetch(here, dest, label) ?: run {
                         failMsg = tr("مقصد پیدا شد ولی مسیر پیاده ساخته نشد. کمی بعد دوباره تلاش کنید.", "Destination found but no walking route.")
                         null
                     }
@@ -324,7 +336,7 @@ class MainActivity : Activity() {
     private fun setRouteBtn() {
         val t = if (route != null) Lang.t("route_stop") else Lang.t("route")
         routeBtn.text = t; routeBtn.contentDescription = t
-        noteBtn.visibility = if (route != null) android.view.View.VISIBLE else android.view.View.GONE
+        routeRow.visibility = if (route != null) android.view.View.VISIBLE else android.view.View.GONE
     }
 
     /** بررسی مسیر در هر دریافت موقعیت: خروج از مسیر، اعلام مرحله بعد، رسیدن */
@@ -423,7 +435,8 @@ class MainActivity : Activity() {
     }
 
     // ---------- عکس، توصیف و ثبت مانع ----------
-    private fun takePhoto(obstacle: Boolean) {
+    private fun takePhoto(obstacle: Boolean, forRoute: Boolean = false) {
+        if (forRoute && route == null) { speaker.say(tr("ابتدا یک مسیر را شروع کنید.", "Start a route first.")); return }
         if (!settings.cameraEnabled) { speaker.say(tr("دوربین در این گوشی نیست یا در تنظیمات خاموش است.", "Camera is not available.")); return }
         val mode = settings.processingMode
         if (!obstacle && mode != ProcessingMode.LOCAL && !settings.aiConfigured) {
@@ -438,7 +451,8 @@ class MainActivity : Activity() {
         }
         if (!ask(Manifest.permission.CAMERA, REQ_CAM)) return
         pendingObstacle = obstacle
-        if (!CameraModule.open(this)) { pendingObstacle = false; speaker.say(tr("برنامه دوربین باز نشد.", "Camera app did not open.")) }
+        pendingRouteNote = forRoute
+        if (!CameraModule.open(this)) { pendingObstacle = false; pendingRouteNote = false; speaker.say(tr("برنامه دوربین باز نشد.", "Camera app did not open.")) }
         else speaker.say(tr("دوربین باز شد. دکمه گرفتن عکس معمولاً پایین وسط صفحه است.", "Camera opened. Tap the shutter button."))
     }
 
@@ -446,16 +460,39 @@ class MainActivity : Activity() {
         super.onActivityResult(req, res, data)
         if (req != CameraModule.REQUEST) return
         val obstacle = pendingObstacle; pendingObstacle = false
+        val forRoute = pendingRouteNote; pendingRouteNote = false
         if (res != RESULT_OK) { speaker.say(tr("عکسی گرفته نشد.", "No photo taken.")); return }
         speaker.say(tr("در حال تحلیل تصویر. ممکن است چند ثانیه طول بکشد.", "Analyzing image."))
         Thread {
             val bmp = CameraModule.extract(this, data)
             if (bmp == null) { runOnUiThread { speaker.say(tr("عکس خوانده نشد.", "Photo could not be read.")) }; return@Thread }
             if (obstacle) { saveObstacle(bmp); return@Thread }
+            if (forRoute) { addPhotoNote(bmp); return@Thread }
             router.analyze(bmp) { r, err ->
                 runOnUiThread { speaker.say(r?.descriptionFa ?: err ?: tr("تحلیل ناموفق بود.", "Analysis failed.")) }
             }
         }.start()
+    }
+
+    /** توصیف عکس را به‌عنوان یادداشت در مکان فعلی به مسیر پیاده اضافه می‌کند */
+    private fun addPhotoNote(bmp: Bitmap) {
+        runOnUiThread {
+            val r = route ?: return@runOnUiThread
+            location.getOnce { l, msg ->
+                if (l == null) { speaker.say(msg); return@getOnce }
+                Thread {
+                    router.analyze(bmp) { res, err ->
+                        val text = res?.descriptionFa ?: err ?: tr("توصیف عکس انجام نشد.", "Photo description failed.")
+                        runOnUiThread {
+                            val n = Note(text, l.latitude, l.longitude)
+                            r.notes.add(n); announcedNotes.add(n)
+                            RouteService.save(this, r)
+                            speaker.say(tr("توصیف عکس به مسیر اضافه شد: $text", "Photo description added to route: $text"))
+                        }
+                    }
+                }.start()
+            }
+        }
     }
 
     /** مانع را با عکس و مکان ذخیره می‌کند و توصیف آن را (در صورت امکان) از هوش مصنوعی می‌گیرد */
