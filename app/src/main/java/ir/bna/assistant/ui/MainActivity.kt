@@ -49,8 +49,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var trackBtn: Button
     private lateinit var routeBtn: Button
-    private lateinit var noteBtn: Button
-    private lateinit var routeRow: LinearLayout
+    private lateinit var bottomBar: LinearLayout
     private val handler = Handler(Looper.getMainLooper())
 
     // وضعیت جهت‌یابی پیوسته
@@ -92,33 +91,15 @@ class MainActivity : Activity() {
         status = Ui.status(this)
         col.addView(top)
         col.addView(status)
-        col.addView(Ui.button(this, Lang.t("where")) { whereAmI() })
-        trackBtn = Ui.button(this, Lang.t("direction")) { toggleTracking() }
-        col.addView(trackBtn)
-        routeBtn = Ui.button(this, Lang.t("route")) { if (route != null) endRoute(true) else showRouteList() }
-        col.addView(routeBtn)
-        // ردیف پایین صفحه اصلی: توصیف عکس
-        col.addView(LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL
-            addView(Ui.button(this@MainActivity, Lang.t("photo")) { takePhoto(false) }.apply {
-                layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(8, 12, 8, 12) }
-            })
-        })
-        // ردیف صفحه پیاده‌روی (فقط وقتی مسیر فعال است): افزودن متن، توصیف عکس، ثبت مانع
-        routeRow = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL; layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL
-            visibility = android.view.View.GONE
+        // پایین صفحه: نوار دکمه‌ها، جدا از بخش پیام‌ها و همیشه دیده می‌شود
+        bottomBar = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL; layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL
+            setPadding(8, 8, 8, 8)
         }
-        fun rowBtn(t: String, f: () -> Unit) = android.widget.Button(this).apply {
-            text = t; contentDescription = t; setOnClickListener { f() }
-            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(8, 12, 8, 12) }
-        }
-        noteBtn = rowBtn(tr("افزودن متن", "Add text")) { addNote() }
-        routeRow.addView(noteBtn)
-        routeRow.addView(rowBtn(Lang.t("photo")) { takePhoto(false, forRoute = true) })
-        routeRow.addView(rowBtn(Lang.t("obstacle")) { takePhoto(true) })
-        col.addView(routeRow)
-        setContentView(ScrollView(this).apply { addView(col) })
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL }
+        root.addView(ScrollView(this).apply { addView(col) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(bottomBar, LinearLayout.LayoutParams(-1, -2))
+        setContentView(root)
         setRouteBtn()
 
         speaker = Speaker(this, { settings.speechOutput }) { t, a -> runOnUiThread { Ui.show(status, t, a) } }
@@ -221,17 +202,34 @@ class MainActivity : Activity() {
             orientation = LinearLayout.VERTICAL
             layoutParams = ViewGroup.LayoutParams(-1, (resources.displayMetrics.heightPixels * 0.75).toInt())
         }
+        // نام مسیر قابل ویرایش است؛ خالی بماند، نام مقصد استفاده می‌شود
+        val nameEt = android.widget.EditText(this).apply {
+            setText(r.destName); hint = tr("نام مسیر", "Route name"); setSingleLine(true)
+            contentDescription = tr("نام مسیر", "Route name")
+        }
+        fun named(): Route {
+            val n = nameEt.text.toString().trim().ifEmpty { r.destName }
+            return Route(n, r.points, r.steps, r.totalM, r.notes)
+        }
+        root.addView(nameEt, LinearLayout.LayoutParams(-1, -2).apply { setMargins(24, 6, 24, 6) })
         root.addView(ScrollView(this).apply { addView(tv) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        val startBtn = btn(tr("شروع پیاده‌روی", "Start walking")) {
-            route = r; stepIdx = 0; announcedIdx = -1
-            RouteService.save(this, r); setRouteBtn()
-            speaker.say(tr("شروع مسیر به ${r.destName}. ", "Starting route. ") + (r.steps.firstOrNull()?.text ?: ""))
-            if (!location.isTracking) startTracking(announce = false)
-        }.apply { layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(24, 6, 24, 6) } }
-        root.addView(startBtn)
+        // یک ردیف پایین: شروع پیاده‌روی، ذخیره، حذف (اگر ذخیره‌شده است)، بستن
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL }
+        row.addView(btn(tr("شروع پیاده‌روی", "Start walking")) {
+            val nr = named()
+            route = nr; stepIdx = 0; announcedIdx = -1
+            RouteService.save(this, nr); setRouteBtn()
+            speaker.say(tr("شروع مسیر به ${nr.destName}. ", "Starting route. ") + (nr.steps.firstOrNull()?.text ?: ""))
+            if (!location.isTracking) startTracking(announce = false)
+        })
+        row.addView(btn(tr("ذخیره", "Save")) {
+            val nr = named()
+            // تغییر نام = حذف فایل قبلی و ذخیره با نام جدید
+            if (file != null && nr.destName != r.destName) RouteService.deleteSaved(file)
+            RouteService.saveToLibrary(this, nr)
+            speaker.say(tr("مسیر ذخیره شد.", "Route saved."))
+        })
         if (file != null) row.addView(btn(tr("حذف", "Delete")) { RouteService.deleteSaved(file); speaker.say(tr("مسیر حذف شد.", "Route deleted.")) })
-        else row.addView(btn(tr("ذخیره مسیر", "Save route")) { RouteService.saveToLibrary(this, r); speaker.say(tr("مسیر ذخیره شد.", "Route saved.")) })
         row.addView(btn(Lang.t("close")) {})
         root.addView(row, LinearLayout.LayoutParams(-1, -2))
         dlg.setView(root)
@@ -333,10 +331,39 @@ class MainActivity : Activity() {
         if (say) speaker.say(tr("مسیر پایان یافت.", "Route ended."))
     }
 
+    /** نوار پایین را بر اساس حالت (عادی یا پیاده‌روی) می‌سازد */
     private fun setRouteBtn() {
-        val t = if (route != null) Lang.t("route_stop") else Lang.t("route")
-        routeBtn.text = t; routeBtn.contentDescription = t
-        routeRow.visibility = if (route != null) android.view.View.VISIBLE else android.view.View.GONE
+        bottomBar.removeAllViews()
+        fun b(t: String, f: () -> Unit) = Button(this).apply {
+            text = t; contentDescription = t; textSize = 15f; minHeight = 0; minimumHeight = 0
+            setOnClickListener { f() }
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f).apply { setMargins(4, 6, 4, 6) }
+        }
+        fun row(vararg bs: Button) = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL; layoutDirection = android.view.View.LAYOUT_DIRECTION_RTL
+            bs.forEach { addView(it) }
+        }
+        trackBtn = b(if (location.isTracking) Lang.t("stop_dir") else Lang.t("direction")) { toggleTracking() }
+        if (route == null) {
+            routeBtn = b(Lang.t("route")) { showRouteList() }
+            bottomBar.addView(row(b(Lang.t("where")) { whereAmI() }, trackBtn, routeBtn, b(Lang.t("photo")) { takePhoto(false) }))
+        } else {
+            // ردیف بالای نوار: یادداشت‌ها و عکس‌ها در موقعیت فعلی
+            bottomBar.addView(row(
+                b(tr("افزودن متن", "Add text")) { addNote() },
+                b(tr("ثبت با عکس", "Photo note")) { takePhoto(false, forRoute = true) },
+                b(tr("ذخیره", "Save")) { saveRouteNotes() }))
+            routeBtn = b(Lang.t("route_stop")) { endRoute(true) }
+            bottomBar.addView(row(b(Lang.t("where")) { whereAmI() }, trackBtn, routeBtn,
+                b(Lang.t("close")) { moveTaskToBack(true) }))
+        }
+    }
+
+    /** ذخیره‌ی مسیر جاری همراه یادداشت‌ها و عکس‌ها */
+    private fun saveRouteNotes() {
+        val r = route ?: return
+        RouteService.save(this, r)
+        speaker.say(tr("مسیر و یادداشت‌ها ذخیره شد.", "Route and notes saved."))
     }
 
     /** بررسی مسیر در هر دریافت موقعیت: خروج از مسیر، اعلام مرحله بعد، رسیدن */
