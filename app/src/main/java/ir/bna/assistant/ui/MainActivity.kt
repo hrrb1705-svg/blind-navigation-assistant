@@ -64,7 +64,6 @@ class MainActivity : Activity() {
     private var lastOffAlert = 0L
     private val announcedObs = mutableSetOf<Long>()
     private val announcedNotes = mutableSetOf<Note>()
-    private var pendingObstacle = false
     private var pendingRouteNote = false
 
     override fun onCreate(b: Bundle?) {
@@ -346,12 +345,12 @@ class MainActivity : Activity() {
         trackBtn = b(if (location.isTracking) Lang.t("stop_dir") else Lang.t("direction")) { toggleTracking() }
         if (route == null) {
             routeBtn = b(Lang.t("route")) { showRouteList() }
-            bottomBar.addView(row(b(Lang.t("where")) { whereAmI() }, trackBtn, routeBtn, b(Lang.t("photo")) { takePhoto(false) }))
+            bottomBar.addView(row(b(Lang.t("where")) { whereAmI() }, trackBtn, routeBtn, b(Lang.t("photo")) { takePhoto() }))
         } else {
             // ردیف بالای نوار: یادداشت‌ها و عکس‌ها در موقعیت فعلی
             bottomBar.addView(row(
                 b(tr("افزودن متن", "Add text")) { addNote() },
-                b(tr("ثبت با عکس", "Photo note")) { takePhoto(false, forRoute = true) },
+                b(tr("ثبت با عکس", "Photo note")) { takePhoto(forRoute = true) },
                 b(tr("ذخیره", "Save")) { saveRouteNotes() }))
             routeBtn = b(Lang.t("route_stop")) { endRoute(true) }
             bottomBar.addView(row(b(Lang.t("where")) { whereAmI() }, trackBtn, routeBtn,
@@ -462,38 +461,35 @@ class MainActivity : Activity() {
     }
 
     // ---------- عکس، توصیف و ثبت مانع ----------
-    private fun takePhoto(obstacle: Boolean, forRoute: Boolean = false) {
+    private fun takePhoto(forRoute: Boolean = false) {
         if (forRoute && route == null) { speaker.say(tr("ابتدا یک مسیر را شروع کنید.", "Start a route first.")); return }
         if (!settings.cameraEnabled) { speaker.say(tr("دوربین در این گوشی نیست یا در تنظیمات خاموش است.", "Camera is not available.")); return }
         val mode = settings.processingMode
-        if (!obstacle && mode != ProcessingMode.LOCAL && !settings.aiConfigured) {
+        if (mode != ProcessingMode.LOCAL && !settings.aiConfigured) {
             speaker.say(tr("هوش مصنوعی هنوز تنظیم نشده است. در تنظیمات، بخش هوش مصنوعی، کلید را وارد کنید. " +
                 "یا محل پردازش را روی «روی گوشی» بگذارید که فقط نور محیط را می‌سنجد.", "AI is not configured. Add the key in Settings."))
             return
         }
-        if (!obstacle && mode != ProcessingMode.LOCAL && !Capabilities.internetNow(this)) {
+        if (mode != ProcessingMode.LOCAL && !Capabilities.internetNow(this)) {
             speaker.say(if (mode == ProcessingMode.REMOTE) tr("اینترنت وصل نیست. توصیف محیط بدون اینترنت ممکن نیست.", "No internet.")
                         else tr("اینترنت وصل نیست. فقط تحلیل ساده نور انجام می‌شود.", "No internet. Only simple analysis."))
             if (mode == ProcessingMode.REMOTE) return
         }
         if (!ask(Manifest.permission.CAMERA, REQ_CAM)) return
-        pendingObstacle = obstacle
         pendingRouteNote = forRoute
-        if (!CameraModule.open(this)) { pendingObstacle = false; pendingRouteNote = false; speaker.say(tr("برنامه دوربین باز نشد.", "Camera app did not open.")) }
+        if (!CameraModule.open(this)) { pendingRouteNote = false; speaker.say(tr("برنامه دوربین باز نشد.", "Camera app did not open.")) }
         else speaker.say(tr("دوربین باز شد. دکمه گرفتن عکس معمولاً پایین وسط صفحه است.", "Camera opened. Tap the shutter button."))
     }
 
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
         super.onActivityResult(req, res, data)
         if (req != CameraModule.REQUEST) return
-        val obstacle = pendingObstacle; pendingObstacle = false
         val forRoute = pendingRouteNote; pendingRouteNote = false
         if (res != RESULT_OK) { speaker.say(tr("عکسی گرفته نشد.", "No photo taken.")); return }
         speaker.say(tr("در حال تحلیل تصویر. ممکن است چند ثانیه طول بکشد.", "Analyzing image."))
         Thread {
             val bmp = CameraModule.extract(this, data)
             if (bmp == null) { runOnUiThread { speaker.say(tr("عکس خوانده نشد.", "Photo could not be read.")) }; return@Thread }
-            if (obstacle) { saveObstacle(bmp); return@Thread }
             if (forRoute) { addPhotoNote(bmp); return@Thread }
             router.analyze(bmp) { r, err ->
                 runOnUiThread { speaker.say(r?.descriptionFa ?: err ?: tr("تحلیل ناموفق بود.", "Analysis failed.")) }
@@ -522,27 +518,6 @@ class MainActivity : Activity() {
         }
     }
 
-    /** مانع را با عکس و مکان ذخیره می‌کند و توصیف آن را (در صورت امکان) از هوش مصنوعی می‌گیرد */
-    private fun saveObstacle(bmp: Bitmap) {
-        runOnUiThread {
-            if (!settings.gpsEnabled) { speaker.say(tr("بدون جی‌پی‌اس مکان مانع ثبت نمی‌شود.", "Cannot save without GPS.")); return@runOnUiThread }
-            location.getOnce { l, msg ->
-                if (l == null) { speaker.say(msg); return@getOnce }
-                Thread {
-                    val time = System.currentTimeMillis()
-                    val file = java.io.File(Obstacles.dir(this), "$time.jpg")
-                    try { FileOutputStream(file).use { bmp.compress(Bitmap.CompressFormat.JPEG, 80, it) } }
-                    catch (e: Exception) { AppLog.e("ذخیره عکس مانع", e) }
-                    router.analyze(bmp) { r, _ ->
-                        val text = r?.descriptionFa ?: tr("مانع ثبت شد", "Obstacle saved")
-                        Obstacles.add(this, Obstacle(l.latitude, l.longitude, text, file.absolutePath, time))
-                        runOnUiThread { speaker.say(tr("مانع ثبت شد: $text", "Obstacle saved: $text")) }
-                    }
-                }.start()
-            }
-        }
-    }
-
     private fun ask(perm: String, code: Int): Boolean {
         if (checkSelfPermission(perm) == PackageManager.PERMISSION_GRANTED) return true
         requestPermissions(arrayOf(perm), code); return false
@@ -565,11 +540,11 @@ class MainActivity : Activity() {
             "همیشه به حواس و وسایل ایمنی خود اعتماد کنید."
         const val GUIDE_FA = "راهنمای کاربر. کجا هستم: نشانی تقریبی را می‌گوید. جهت‌یابی: هنگام حرکت، جهت را هر چند ثانیه بررسی و اعلام می‌کند. " +
             "مسیر به مقصد: نام مقصد را بنویسید؛ مراحل را می‌گوید و اگر از مسیر خارج شوید هشدار می‌دهد. " +
-            "ثبت مانع: از مانع عکس بگیرید تا با مکان ذخیره شود و هنگام نزدیک شدن دوباره اعلام شود. " +
+            "ثبت با عکس: هنگام پیاده‌روی از اطراف عکس بگیرید تا توصیف آن به‌عنوان یادداشت در مسیر ذخیره شود. " +
             "توصیف عکس: برای توصیف، هوش مصنوعی باید در تنظیمات وارد شود."
         const val GUIDE_EN = "User guide. Where am I: tells approximate address. Direction: checks and announces heading while you walk. " +
             "Route: enter a destination; steps are spoken and off-route warnings are given. " +
-            "Report obstacle: take a photo; it is saved with location and announced when you approach. " +
+            "Photo note: while walking, take a photo; its description is saved as a route note. " +
             "Describe photo: requires AI settings."
     }
 }
