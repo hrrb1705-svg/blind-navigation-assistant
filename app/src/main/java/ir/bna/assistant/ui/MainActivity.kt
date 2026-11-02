@@ -22,7 +22,6 @@ import android.widget.TextView
 import ir.bna.assistant.ai.LocalBasicAnalyzer
 import ir.bna.assistant.ai.ProcessingRouter
 import ir.bna.assistant.ai.RemoteAnalyzer
-import ir.bna.assistant.camera.CameraModule
 import ir.bna.assistant.compass.CompassModule
 import ir.bna.assistant.core.AppLog
 import ir.bna.assistant.core.Capabilities
@@ -64,7 +63,6 @@ class MainActivity : Activity() {
     private var lastOffAlert = 0L
     private val announcedObs = mutableSetOf<Long>()
     private val announcedNotes = mutableSetOf<Note>()
-    private var pendingRouteNote = false
 
     override fun onCreate(b: Bundle?) {
         super.onCreate(b)
@@ -476,29 +474,12 @@ class MainActivity : Activity() {
             if (mode == ProcessingMode.REMOTE) return
         }
         if (!ask(Manifest.permission.CAMERA, REQ_CAM)) return
-        pendingRouteNote = forRoute
         CaptureBridge.forRoute = forRoute
         CaptureBridge.analyze = { bmp, cb -> router.analyze(bmp, cb) }
         CaptureBridge.onRoutePhoto = { bmp -> addPhotoNote(bmp) }
         CaptureBridge.say = { text -> speaker.say(text) }
         CaptureBridge.frameIntervalSec = { settings.frameIntervalSec }
         startActivity(Intent(this, CaptureActivity::class.java))
-    }
-
-    override fun onActivityResult(req: Int, res: Int, data: Intent?) {
-        super.onActivityResult(req, res, data)
-        if (req != CameraModule.REQUEST) return
-        val forRoute = pendingRouteNote; pendingRouteNote = false
-        if (res != RESULT_OK) { speaker.say(tr("عکسی گرفته نشد.", "No photo taken.")); return }
-        speaker.say(tr("در حال تحلیل تصویر. ممکن است چند ثانیه طول بکشد.", "Analyzing image."))
-        Thread {
-            val bmp = CameraModule.extract(this, data)
-            if (bmp == null) { runOnUiThread { speaker.say(tr("عکس خوانده نشد.", "Photo could not be read.")) }; return@Thread }
-            if (forRoute) { addPhotoNote(bmp); return@Thread }
-            router.analyze(bmp) { r, err ->
-                runOnUiThread { speaker.say(r?.descriptionFa ?: err ?: tr("تحلیل ناموفق بود.", "Analysis failed.")) }
-            }
-        }.start()
     }
 
     /** توصیف عکس را به‌عنوان یادداشت در مکان فعلی به مسیر پیاده اضافه می‌کند */

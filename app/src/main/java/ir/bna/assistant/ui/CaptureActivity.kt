@@ -114,7 +114,7 @@ class CaptureActivity : ComponentActivity() {
         this.text = text; contentDescription = text; minHeight = dp(56); setPadding(dp(12), 0, dp(12), 0)
         layoutParams = RadioGroup.LayoutParams(0, RadioGroup.LayoutParams.WRAP_CONTENT, 1f)
         tag = id
-        generateViewId().let { this.id = it }
+        View.generateViewId().let { this.id = it }
     }
 
     private fun btn(text: String, onClick: () -> Unit) = Button(this).apply {
