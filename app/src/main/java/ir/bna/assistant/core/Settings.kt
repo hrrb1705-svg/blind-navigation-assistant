@@ -34,6 +34,9 @@ class Settings(ctx: Context, private val caps: Capabilities) {
     /** فاصله زمانی بررسی موقعیت در جهت‌یابی پیوسته (ثانیه) */
     var trackIntervalSec: Int
         get() = p.getInt("track_sec", 5); set(v) = p.edit().putInt("track_sec", v).apply()
+    /** فاصله ارسال فریم در حالت فیلم (ثانیه)؛ صفر یعنی پیوسته */
+    var frameIntervalSec: Int
+        get() = p.getInt("frame_sec", 2); set(v) = p.edit().putInt("frame_sec", v).apply()
 
     // هوش مصنوعی اینترنتی (سازگار با OpenAI)
     var aiUrl: String

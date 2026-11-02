@@ -477,8 +477,12 @@ class MainActivity : Activity() {
         }
         if (!ask(Manifest.permission.CAMERA, REQ_CAM)) return
         pendingRouteNote = forRoute
-        if (!CameraModule.open(this)) { pendingRouteNote = false; speaker.say(tr("برنامه دوربین باز نشد.", "Camera app did not open.")) }
-        else speaker.say(tr("دوربین باز شد. دکمه گرفتن عکس معمولاً پایین وسط صفحه است.", "Camera opened. Tap the shutter button."))
+        CaptureBridge.forRoute = forRoute
+        CaptureBridge.analyze = { bmp, cb -> router.analyze(bmp, cb) }
+        CaptureBridge.onRoutePhoto = { bmp -> addPhotoNote(bmp) }
+        CaptureBridge.say = { text -> speaker.say(text) }
+        CaptureBridge.frameIntervalSec = { settings.frameIntervalSec }
+        startActivity(Intent(this, CaptureActivity::class.java))
     }
 
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {

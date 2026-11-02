@@ -24,6 +24,7 @@
             </intent-filter>
         </activity>
         <activity android:name=".ui.SettingsActivity" android:exported="false"/>
+        <activity android:name=".ui.CaptureActivity" android:exported="false"/>
         <provider
             android:name=".camera.PhotoProvider"
             android:authorities="ir.bna.assistant.photo"
