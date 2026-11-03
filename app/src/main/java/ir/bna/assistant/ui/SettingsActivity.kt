@@ -114,7 +114,15 @@ class SettingsActivity : Activity() {
         col.addView(Ui.button(this, "آزمایش اتصال هوش مصنوعی") { testAi() })
 
         col.addView(Ui.button(this, "خواندن گزارش خطاها") {
-            val errs = AppLog.read().lines().filter { "[ERROR]" in it || "جزئیات" in it }.takeLast(60)
+            // خلاصه: ردیف‌های تکراری یکی می‌شوند، با شمارش و آخرین ساعت
+            val groups = linkedMapOf<String, Pair<String, Int>>()
+            AppLog.read().lines().filter { "[ERROR]" in it || "جزئیات" in it }.forEach { ln ->
+                val hm = ln.substringAfter(' ', "").take(5)
+                val msg = ln.substringAfter("] ", ln).replace(Regex("\\s+"), " ").take(110)
+                val old = groups.remove(msg)
+                groups[msg] = hm to ((old?.second ?: 0) + 1)
+            }
+            val errs = groups.entries.toList().takeLast(30).map { (m, v) -> "${v.first} - $m" + if (v.second > 1) " (×${v.second})" else "" }
             val text = if (errs.isEmpty()) "خطایی ثبت نشده است." else errs.joinToString("\n\n")
             val tv = android.widget.LinearLayout(this).apply {
                 orientation = android.widget.LinearLayout.VERTICAL

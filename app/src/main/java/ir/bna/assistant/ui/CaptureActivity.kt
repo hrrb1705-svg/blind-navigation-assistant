@@ -31,7 +31,7 @@ import java.util.concurrent.Executors
 /** پل بین صفحه دوربین و MainActivity */
 object CaptureBridge {
     var analyze: ((Bitmap, (SceneResult?, String?) -> Unit) -> Unit)? = null
-    var onRoutePhoto: ((Bitmap) -> Unit)? = null
+    var onRoutePhoto: ((String) -> Unit)? = null
     var say: ((String) -> Unit)? = null
     var frameIntervalSec: () -> Int = { 2 }
     /** true یعنی عکس برای یادداشت مسیر است */
@@ -173,8 +173,8 @@ class CaptureActivity : ComponentActivity() {
                 val bmp = toBitmap(image)
                 image.close()
                 if (bmp == null) { say(tr("عکس خوانده نشد.", "Photo could not be read.")); return }
-                if (CaptureBridge.forRoute) CaptureBridge.onRoutePhoto?.invoke(bmp)
-                else analyzeAndSay(bmp)
+                say(tr("عکس گرفته شد.", "Photo taken."))
+                analyzeAndSay(bmp)
             }
             override fun onError(e: ImageCaptureException) {
                 AppLog.e("گرفتن عکس ناموفق بود", e)
@@ -241,7 +241,18 @@ class CaptureActivity : ComponentActivity() {
     private fun analyzeAndSay(bmp: Bitmap) {
         val a = CaptureBridge.analyze ?: return
         say(tr("در حال تحلیل تصویر…", "Analyzing…"))
-        a(bmp) { r, err -> say(r?.descriptionFa ?: err ?: tr("تحلیل ناموفق بود.", "Analysis failed.")) }
+        a(bmp) { r, err ->
+            val text = r?.descriptionFa
+            if (text == null || !CaptureBridge.forRoute) {
+                say(text ?: err ?: tr("تحلیل ناموفق بود.", "Analysis failed."))
+            } else runOnUiThread {
+                say(text)
+                android.app.AlertDialog.Builder(this).setTitle(tr("ذخیره در این مکان؟", "Save at this place?"))
+                    .setMessage(text)
+                    .setPositiveButton(tr("ذخیره", "Save")) { _, _ -> CaptureBridge.onRoutePhoto?.invoke(text) }
+                    .setNegativeButton(tr("لغو", "Cancel"), null).show()
+            }
+        }
     }
 
     /** ImageProxy را به Bitmap با چرخش درست تبدیل می‌کند */

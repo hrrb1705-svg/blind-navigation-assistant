@@ -316,9 +316,11 @@ class MainActivity : Activity() {
                 location.getOnce { l, msg ->
                     if (l == null) { speaker.say(msg); return@getOnce }
                     val n = Note(t, l.latitude, l.longitude)
-                    r.notes.add(n); announcedNotes.add(n)
-                    RouteService.save(this, r)
-                    speaker.say(tr("یادداشت ذخیره شد.", "Note saved."))
+                    runOnUiThread {
+                        r.notes.add(n); announcedNotes.add(n)
+                        RouteService.save(this, r)
+                        speaker.say(tr("یادداشت در این مکان ذخیره شد.", "Note saved here."))
+                    }
                 }
             }.setNegativeButton(Lang.t("close"), null).show()
     }
@@ -368,6 +370,8 @@ class MainActivity : Activity() {
         val r = route ?: return
         val d = RouteService.distanceToRoute(r, l.latitude, l.longitude)
         val now = System.currentTimeMillis()
+        for (n in r.notes) if (distTo(l, n.lat, n.lon) <= 20 && announcedNotes.add(n))
+            speaker.say(tr("یادداشت شما: ${n.text}", "Your note: ${n.text}"))
         if (d > RouteService.OFF_ROUTE_M) {
             if (now - lastOffAlert > OFF_ALERT_MS) {
                 lastOffAlert = now
@@ -376,8 +380,6 @@ class MainActivity : Activity() {
             }
             return
         }
-        for (n in r.notes) if (distTo(l, n.lat, n.lon) <= 20 && announcedNotes.add(n))
-            speaker.say(tr("یادداشت شما: ${n.text}", "Your note: ${n.text}"))
         val s = r.steps.getOrNull(stepIdx)
         if (s == null) { speaker.say(tr("به مقصد رسیدید.", "You have arrived.")); endRoute(false); return }
         val dist = distTo(l, s.lat, s.lon)
@@ -476,29 +478,24 @@ class MainActivity : Activity() {
         if (!ask(Manifest.permission.CAMERA, REQ_CAM)) return
         CaptureBridge.forRoute = forRoute
         CaptureBridge.analyze = { bmp, cb -> router.analyze(bmp, cb) }
-        CaptureBridge.onRoutePhoto = { bmp -> addPhotoNote(bmp) }
+        CaptureBridge.onRoutePhoto = { text -> addPhotoNote(text) }
         CaptureBridge.say = { text -> speaker.say(text) }
         CaptureBridge.frameIntervalSec = { settings.frameIntervalSec }
         startActivity(Intent(this, CaptureActivity::class.java))
     }
 
     /** توصیف عکس را به‌عنوان یادداشت در مکان فعلی به مسیر پیاده اضافه می‌کند */
-    private fun addPhotoNote(bmp: Bitmap) {
+    private fun addPhotoNote(text: String) {
         runOnUiThread {
             val r = route ?: return@runOnUiThread
             location.getOnce { l, msg ->
                 if (l == null) { speaker.say(msg); return@getOnce }
-                Thread {
-                    router.analyze(bmp) { res, err ->
-                        val text = res?.descriptionFa ?: err ?: tr("توصیف عکس انجام نشد.", "Photo description failed.")
-                        runOnUiThread {
-                            val n = Note(text, l.latitude, l.longitude)
-                            r.notes.add(n); announcedNotes.add(n)
-                            RouteService.save(this, r)
-                            speaker.say(tr("توصیف عکس به مسیر اضافه شد: $text", "Photo description added to route: $text"))
-                        }
-                    }
-                }.start()
+                runOnUiThread {
+                    val n = Note(text, l.latitude, l.longitude)
+                    r.notes.add(n); announcedNotes.add(n)
+                    RouteService.save(this, r)
+                    speaker.say(tr("یادداشت عکس در این مکان ذخیره شد.", "Photo note saved here."))
+                }
             }
         }
     }
