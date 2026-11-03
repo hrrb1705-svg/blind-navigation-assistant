@@ -217,7 +217,6 @@ class MainActivity : Activity() {
             route = nr; stepIdx = 0; announcedIdx = -1
             RouteService.save(this, nr); setRouteBtn()
             speaker.say(tr("شروع مسیر به ${nr.destName}. ", "Starting route. ") + (nr.steps.firstOrNull()?.text ?: ""))
-            if (!location.isTracking) startTracking(announce = false)
         })
         row.addView(btn(tr("ذخیره", "Save")) {
             val nr = named()
@@ -354,7 +353,47 @@ class MainActivity : Activity() {
                 b(tr("ذخیره", "Save")) { saveRouteNotes() }))
             routeBtn = b(Lang.t("route_stop")) { endRoute(true) }
             bottomBar.addView(row(b(Lang.t("where")) { whereAmI() }, trackBtn, routeBtn,
-                b(Lang.t("close")) { moveTaskToBack(true) }))
+                b(tr("اطلاعات بیشتر", "More info")) { moreInfo() }))
+        }
+    }
+
+    /** یادداشت‌ها و توصیف‌های ذخیره‌شده در شعاع ۲۰ متری موقعیت فعلی؛ قابل ویرایش و حذف */
+    private fun moreInfo() {
+        val r = route ?: return
+        speaker.say(tr("در حال یافتن موقعیت.", "Finding location."))
+        location.getOnce { l, msg ->
+            if (l == null) { speaker.say(msg); return@getOnce }
+            runOnUiThread {
+                val near = r.notes.filter { distTo(l, it.lat, it.lon) <= 20 }
+                if (near.isEmpty()) { speaker.say(tr("در این حدود یادداشتی ذخیره نشده است.", "No saved notes nearby.")); return@runOnUiThread }
+                val ets = near.map { n -> EditText(this).apply { setText(n.text); contentDescription = tr("متن یادداشت", "Note text") } }
+                val removed = mutableSetOf<Note>()
+                val col = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 8, 24, 8) }
+                near.forEachIndexed { i, n ->
+                    col.addView(ets[i])
+                    col.addView(Button(this).apply {
+                        text = tr("حذف یادداشت ${i + 1}", "Delete note ${i + 1}")
+                        setOnClickListener {
+                            removed.add(n); ets[i].isEnabled = false; ets[i].setText(""); isEnabled = false
+                            speaker.say(tr("برای حذف علامت خورد؛ ذخیره را بزنید.", "Marked for deletion; press Save."))
+                        }
+                    })
+                }
+                AlertDialog.Builder(this).setTitle(tr("یادداشت‌های این مکان (${near.size})", "Notes here (${near.size})"))
+                    .setView(ScrollView(this).apply { addView(col) })
+                    .setPositiveButton(tr("ذخیره", "Save")) { _, _ ->
+                        near.forEachIndexed { i, n ->
+                            val idx = r.notes.indexOf(n)
+                            if (idx < 0) return@forEachIndexed
+                            val t = ets[i].text.toString().trim()
+                            if (n in removed || t.isEmpty()) r.notes.removeAt(idx)
+                            else if (t != n.text) r.notes[idx] = Note(t, n.lat, n.lon)
+                        }
+                        RouteService.save(this, r)
+                        speaker.say(tr("تغییرات ذخیره شد.", "Changes saved."))
+                    }.setNegativeButton(Lang.t("close"), null).show()
+                speaker.say(tr("${near.size} یادداشت در این مکان. متن‌ها در صفحه است.", "${near.size} notes here."))
+            }
         }
     }
 
@@ -370,8 +409,6 @@ class MainActivity : Activity() {
         val r = route ?: return
         val d = RouteService.distanceToRoute(r, l.latitude, l.longitude)
         val now = System.currentTimeMillis()
-        for (n in r.notes) if (distTo(l, n.lat, n.lon) <= 20 && announcedNotes.add(n))
-            speaker.say(tr("یادداشت شما: ${n.text}", "Your note: ${n.text}"))
         if (d > RouteService.OFF_ROUTE_M) {
             if (now - lastOffAlert > OFF_ALERT_MS) {
                 lastOffAlert = now
