@@ -213,7 +213,8 @@ class CaptureActivity : ComponentActivity() {
         setVideoLabel(tr("شروع فیلم", "Start video"))
         applyModeViews()
         if (!silent) {
-            say(tr("ضبط پایان یافت.", "Recording ended."))
+            say(if (busy) tr("ضبط پایان یافت. نتیجه تحلیل آخرین تصویر را می‌گویم.", "Recording ended. Last frame result is coming.")
+                else tr("ضبط پایان یافت.", "Recording ended."))
             focus(videoBtn)
         }
     }
@@ -233,7 +234,8 @@ class CaptureActivity : ComponentActivity() {
         if (bmp == null || a == null) { busy = false; return }
         a(bmp) { r, err ->
             busy = false
-            if (recording) say(r?.descriptionFa ?: err ?: tr("تحلیل فریم ناموفق بود.", "Frame analysis failed."))
+            // جواب فریم در راه حتی بعد از پایان ضبط هم خوانده می‌شود
+            say(r?.descriptionFa ?: err ?: tr("تحلیل فریم ناموفق بود.", "Frame analysis failed."))
         }
     }
 
