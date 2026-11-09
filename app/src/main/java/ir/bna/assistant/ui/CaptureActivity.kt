@@ -95,6 +95,7 @@ class CaptureActivity : ComponentActivity() {
         status = TextView(this).apply {
             textSize = 18f; gravity = Gravity.CENTER; setPadding(dp(16), dp(12), dp(16), dp(12))
             text = tr("در حال باز کردن دوربین…", "Opening camera…")
+            maxLines = 8; movementMethod = android.text.method.ScrollingMovementMethod()
         }
 
         modeGroup = RadioGroup(this).apply {
@@ -298,7 +299,7 @@ class CaptureActivity : ComponentActivity() {
         a(bmp) { r, err ->
             busy = false
             // جواب فریم در راه حتی بعد از پایان ضبط هم خوانده می‌شود
-            say(r?.descriptionFa ?: err ?: tr("تحلیل فریم ناموفق بود.", "Frame analysis failed."))
+            sayAdd(r?.descriptionFa ?: err ?: tr("تحلیل فریم ناموفق بود.", "Frame analysis failed."))
         }
     }
 
@@ -325,7 +326,7 @@ class CaptureActivity : ComponentActivity() {
         fun finish() {
             processing = false; clearFrames()
             runOnUiThread { videoBtn.isEnabled = true; modeGroup.isEnabled = true }
-            if (!cancelled) { say(tr("تحلیل فیلم تمام شد.", "Video analysis finished.")); focus(videoBtn) }
+            if (!cancelled) { sayAdd(tr("تحلیل فیلم تمام شد.", "Video analysis finished.")); focus(videoBtn) }
         }
         fun next(i: Int) {
             if (cancelled) { finish(); return }
@@ -334,24 +335,24 @@ class CaptureActivity : ComponentActivity() {
             files[i].delete()
             if (bmp == null) { next(i + 1); return }
             a(bmp) { r, err ->
-                if (!cancelled) say(tr("تصویر ${i + 1}: ", "Frame ${i + 1}: ") +
+                if (!cancelled) sayAdd(tr("تصویر ${i + 1}: ", "Frame ${i + 1}: ") +
                     (r?.descriptionFa ?: err ?: tr("تحلیل ناموفق بود.", "Analysis failed.")))
-                next(i + 1)
+                Thread { next(i + 1) }.start()
             }
         }
-        next(0)
+        Thread { next(0) }.start()
     }
 
     // ---------- کمک‌ها ----------
     private fun analyzeAndSay(bmp: Bitmap) {
         val a = CaptureBridge.analyze ?: return
-        say(tr("در حال تحلیل تصویر…", "Analyzing…"))
+        sayAdd(tr("در حال تحلیل تصویر…", "Analyzing…"))
         a(bmp) { r, err ->
             val text = r?.descriptionFa
             if (text == null || !CaptureBridge.forRoute) {
-                say(text ?: err ?: tr("تحلیل ناموفق بود.", "Analysis failed."))
+                sayAdd(text ?: err ?: tr("تحلیل ناموفق بود.", "Analysis failed."))
             } else runOnUiThread {
-                say(text)
+                sayAdd(text)
                 android.app.AlertDialog.Builder(this).setTitle(tr("ذخیره در این مکان؟", "Save at this place?"))
                     .setMessage(text)
                     .setPositiveButton(tr("ذخیره", "Save")) { _, _ -> CaptureBridge.onRoutePhoto?.invoke(text) }
@@ -371,6 +372,13 @@ class CaptureActivity : ComponentActivity() {
     }
 
     /** نمایش متن و گفتار؛ همیشه روی رشته اصلی */
+    /** متن را به متن‌های قبلی اضافه می‌کند و می‌خواند */
+    private fun sayAdd(text: String) = runOnUiThread {
+        status.append("\n" + text)
+        status.post { status.layout?.let { l -> status.scrollTo(0, maxOf(0, l.getLineTop(status.lineCount) - status.height)) } }
+        CaptureBridge.say?.invoke(text)
+    }
+
     private fun say(text: String) = runOnUiThread {
         status.text = text
         CaptureBridge.say?.invoke(text)
