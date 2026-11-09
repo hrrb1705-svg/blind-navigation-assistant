@@ -80,14 +80,6 @@ class SettingsActivity : Activity() {
         }
         col.addView(trackBtn)
 
-        val frameBtn = Ui.button(this, "فاصله تحلیل فریم فیلم: ${s.frameIntervalSec} ثانیه") {}
-        frameBtn.setOnClickListener {
-            val secs = listOf(0, 1, 2, 3, 5, 10)
-            s.frameIntervalSec = secs[(secs.indexOf(s.frameIntervalSec) + 1).mod(secs.size)]
-            label(frameBtn, "فاصله تحلیل فریم فیلم: ${s.frameIntervalSec} ثانیه")
-        }
-        col.addView(frameBtn)
-
         // هوش مصنوعی
         val keyBtn = Ui.button(this, keyLabel()) {}
         keyBtn.setOnClickListener {
